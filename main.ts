@@ -44,15 +44,12 @@ export class DropWidget extends WidgetType {
     div.style.borderTop = "dashed #55555555"
     div.style.opacity = "0"
     div.style.zIndex = "2"
-    // div.innerText = "👉";
 
     div.ondrop = (ev: DragEvent) => {
       ev.preventDefault();
 
       const from = parseInt(ev.dataTransfer?.getData("from") as string)
       const to = parseInt(ev.dataTransfer?.getData("to") as string)
-      // console.log(dragId)
-      // const el = document.getElementById(data)?.parentElement.
       
       const transaction = view.state.update(
         {
@@ -74,20 +71,7 @@ ${view.state.sliceDoc(from, to)}
         }
       );
 
-      // const transaction2 = view.state.update({
-      //   changes: {
-      //     from: from,
-      //     to: to,                  
-      //     insert: ""
-      //   }
-      // });
-      
-      
-      // Apply the transaction to the editor
       view.dispatch(transaction);
-      // view.dispatch(transaction2);
-      // const data = ev.dataTransfer?.getData("text");
-      // ev.target?.appendChild(document.getElementById(data));
     }
 
     div.ondragover = (ev: DragEvent) => {
@@ -116,15 +100,12 @@ export default class MyPlugin extends Plugin {
     this.registerEditorExtension([draggableListItems]);
 	}
 
-	onunload() {
-
-	}
+	onunload() {	}
 }
 
 
 class DraggableListItems implements PluginValue {
   decorations: DecorationSet;
-  // attachedListeners: ;
 
   constructor(view: EditorView) {
     this.decorations = this.buildDecorations(view);
@@ -134,7 +115,6 @@ class DraggableListItems implements PluginValue {
     if (update.docChanged || update.viewportChanged || update.geometryChanged) {
       this.decorations = this.buildDecorations(update.view);
     }
-    // console.log("updates galore")
   }
 
   destroy() {}
@@ -142,38 +122,11 @@ class DraggableListItems implements PluginValue {
   buildDecorations(view: EditorView): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>();
 
-    // const listItems = document.getElementsByClassName("HyperMD-list-line-1 cm-line")
-
-    // if (listItems.length < 1) {
-    //   view.requestMeasure()
-    //   return builder.finish();
-    // }
-    
-    // for (let i = 0; i < listItems.length; i++) {//i < 1; i++) {
-    //   const item = listItems[i]
-
-    //   item.setText("testtest")
-    //   item.setAttribute("draggable", "true")
-      
-    //   builder.add(
-    //     listCharFrom,
-    //     listCharFrom + 1,
-    //     Decoration.mark({
-    //       attributes: {
-    //         draggable: "true"
-    //       }
-    //     })
-    //   );
-    //   // console.log(item.textContent)
-    // }
-    
-
     for (const { from, to } of view.visibleRanges) {
       syntaxTree(view.state).iterate({
         from,
         to,
         enter(node) {
-          console.log(node.type.name)
           if (node.type.name.startsWith("list")) {
             let from = node.from
 
@@ -226,9 +179,7 @@ const pluginSpec: PluginSpec<DraggableListItems> = {
   eventHandlers: {
     dragstart: (ev, view) => {
       const el = ev.target as HTMLElement
-      // ev.dataTransfer?.setData("dragId", el.id);
 
-      // const rawText = view.state.sliceDoc(parseInt(el.getAttribute("aria-from") ?? ""), parseInt(el.getAttribute("aria-to") ?? ""))
       ev.dataTransfer?.setData("from", el.getAttribute("aria-from") ?? "");
       ev.dataTransfer?.setData("to", el.getAttribute("aria-to") ?? "");
     }
