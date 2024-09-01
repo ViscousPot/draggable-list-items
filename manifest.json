@@ -1,0 +1,11 @@
+{
+	"id": "draggable-list-items",
+	"name": "draggable-list-items",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Adds draggable list items to Obsidian",
+	"author": "ViscousPotential",
+	"authorUrl": "https://github.com/ViscousPotential/draggable-list-items",
+	"fundingUrl": "https://buymeacoffee.com/viscouspotential",
+	"isDesktopOnly": false
+}
