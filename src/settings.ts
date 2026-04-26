@@ -1,36 +1,34 @@
-import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import { App, PluginSettingTab, Setting } from "obsidian";
+import DraggableListItemsPlugin from "./main";
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface DraggableListSettings {
+	enabled: boolean;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+export const DEFAULT_SETTINGS: DraggableListSettings = {
+	enabled: true,
+};
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+export class DraggableListSettingTab extends PluginSettingTab {
+	plugin: DraggableListItemsPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: DraggableListItemsPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
-
+		const { containerEl } = this;
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Settings #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+			.setName("Enable drag handles")
+			.setDesc("Show drag handles on list items in reading view and live preview.")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.enabled).onChange(async (v) => {
+					this.plugin.settings.enabled = v;
 					await this.plugin.saveSettings();
-				}));
+				}),
+			);
 	}
 }

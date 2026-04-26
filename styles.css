@@ -1,8 +1,98 @@
-/*
+.markdown-rendered li {
+	position: relative;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.dli-cm-overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 0;
+	height: 0;
+	pointer-events: none;
+	z-index: 5;
+}
 
-If your plugin does not need CSS, delete this file.
+.dli-handle {
+	box-sizing: border-box;
+	width: 1.1em;
+	line-height: 1;
+	text-align: center;
+	font-size: 0.85em;
+	color: var(--text-muted);
+	cursor: grab;
+	user-select: none;
+	-webkit-user-select: none;
+	touch-action: none;
+	visibility: hidden;
+	opacity: 0;
+	transition: opacity 80ms ease;
+	z-index: 6;
+}
 
-*/
+body.dli-mobile .dli-handle {
+	visibility: visible;
+	opacity: 0.7;
+	width: 1.4em;
+	font-size: 1em;
+}
+
+body.dli-mobile .markdown-rendered li > .dli-handle {
+	left: -0.8em;
+}
+
+.markdown-rendered li > .dli-handle {
+	position: absolute;
+	left: -0.9em;
+	top: 0.15em;
+}
+
+.dli-handle-cm {
+	position: absolute;
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.dli-handle.dli-show,
+.dli-handle:hover {
+	visibility: visible;
+	opacity: 0.7;
+}
+
+.dli-handle:hover {
+	opacity: 1;
+	color: var(--text-normal);
+}
+
+.dli-handle:active {
+	cursor: grabbing;
+}
+
+.dli-dragging {
+	opacity: 0.35;
+}
+
+.dli-ghost {
+	position: fixed;
+	pointer-events: none;
+	z-index: 9999;
+	opacity: 0.9;
+	background: var(--background-primary);
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	padding: 0 0.5em;
+	overflow: hidden;
+	user-select: none;
+}
+
+.dli-drop-line {
+	position: fixed;
+	height: 2px;
+	background: var(--interactive-accent);
+	pointer-events: none;
+	z-index: 9998;
+	border-radius: 2px;
+	box-shadow: 0 0 0 1px var(--background-primary);
+}
