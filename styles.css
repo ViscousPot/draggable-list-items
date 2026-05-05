@@ -2,6 +2,13 @@
 	position: relative;
 }
 
+.markdown-rendered .list-collapse-indicator,
+.markdown-rendered .collapse-icon,
+.cm-line .cm-fold-indicator {
+	opacity: 0;
+	pointer-events: none;
+}
+
 .dli-cm-overlay {
 	position: absolute;
 	top: 0;
@@ -23,10 +30,32 @@
 	user-select: none;
 	-webkit-user-select: none;
 	touch-action: none;
-	visibility: hidden;
 	opacity: 0;
 	transition: opacity 80ms ease;
 	z-index: 6;
+}
+
+.markdown-rendered li > .dli-handle {
+	position: absolute;
+	left: -2.2em;
+	top: 0.15em;
+	line-height: inherit;
+	height: 1lh;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.markdown-rendered li.task-list-item > .dli-handle {
+	left: -3em;
+}
+
+.dli-handle-cm {
+	position: absolute;
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 }
 
 body.dli-mobile .dli-handle {
@@ -40,23 +69,9 @@ body.dli-mobile .markdown-rendered li > .dli-handle {
 	left: -0.8em;
 }
 
-.markdown-rendered li > .dli-handle {
-	position: absolute;
-	left: -0.9em;
-	top: 0.15em;
-}
-
-.dli-handle-cm {
-	position: absolute;
-	pointer-events: auto;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-
 .dli-handle.dli-show,
-.dli-handle:hover {
-	visibility: visible;
+.dli-handle:hover,
+.markdown-rendered li:hover > .dli-handle {
 	opacity: 0.7;
 }
 
@@ -78,13 +93,13 @@ body.dli-mobile .markdown-rendered li > .dli-handle {
 	pointer-events: none;
 	z-index: 9999;
 	opacity: 0.9;
-	background: var(--background-primary);
-	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 4px;
-	padding: 0 0.5em;
 	overflow: hidden;
 	user-select: none;
+}
+
+.dli-ghost > ul,
+.dli-ghost > ol {
+	margin: 0;
 }
 
 .dli-drop-line {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-misused-promises */
 import { App, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { findGroup, parseLine } from "../list/parse";
 import { moveItem } from "../list/reorder";
@@ -16,7 +17,9 @@ export function attachReadingViewHandles(
 	const section = ctx.getSectionInfo(el);
 	if (!section) return;
 
-	const lines = section.text.split("\n");
+	const lines = section.text
+		.split("\n")
+		.slice(section.lineStart, section.lineEnd + 1);
 	const startLines: number[] = [];
 	for (let i = 0; i < lines.length; i++) {
 		if (parseLine(lines[i]!)) {
@@ -24,7 +27,7 @@ export function attachReadingViewHandles(
 		}
 	}
 
-	const lis = Array.from(el.querySelectorAll("li")) as HTMLLIElement[];
+	const lis = Array.from(el.querySelectorAll("li"));
 	if (lis.length !== startLines.length) return;
 
 	for (let i = 0; i < lis.length; i++) {
@@ -43,16 +46,26 @@ function addHandle(li: HTMLLIElement, app: App, sourcePath: string): void {
 	handle.draggable = false;
 
 	li.addEventListener("mouseenter", () => handle.classList.add(SHOW_CLASS));
-	li.addEventListener("mouseleave", () => handle.classList.remove(SHOW_CLASS));
+	li.addEventListener("mouseleave", () =>
+		handle.classList.remove(SHOW_CLASS),
+	);
 
-	handle.addEventListener("pointerdown", (ev) => {
+	handle.addEventListener("pointerdown", async (ev) => {
 		if (ev.button !== 0) return;
 		ev.preventDefault();
 		ev.stopPropagation();
-		onHandlePointerDown(ev, li, app, sourcePath);
+		await onHandlePointerDown(ev, li, app, sourcePath);
 	});
 	handle.addEventListener("mousedown", (ev) => ev.preventDefault());
 	handle.addEventListener("dragstart", (ev) => ev.preventDefault());
+	handle.addEventListener("contextmenu", (ev) => {
+		ev.preventDefault();
+		ev.stopPropagation();
+		const chevron = li.querySelector(
+			":scope > .list-collapse-indicator, :scope > .collapse-icon",
+		);
+		if (chevron) (chevron as HTMLElement).click();
+	});
 
 	li.prepend(handle);
 }
@@ -76,7 +89,9 @@ async function onHandlePointerDown(
 	const group = findGroup(lines, sourceLine);
 	if (!group || group.items.length < 2) return;
 
-	const sourceItemIdx = group.items.findIndex((it) => it.startLine === sourceLine);
+	const sourceItemIdx = group.items.findIndex(
+		(it) => it.startLine === sourceLine,
+	);
 	if (sourceItemIdx < 0) return;
 
 	const groupEls = collectGroupEls(li, group.items.length, sourceItemIdx);
@@ -99,18 +114,20 @@ function collectGroupEls(
 	sourceLi: HTMLLIElement,
 	count: number,
 	sourceIdx: number,
-): HTMLElement[] | null {
+): HTMLElement[][] | null {
 	const parent = sourceLi.parentElement;
 	if (!parent) return null;
 	const sameLevel = Array.from(parent.children).filter(
-		(c) => c.tagName === "LI" && (c as HTMLElement).dataset[LINE_ATTR] !== undefined,
+		(c) =>
+			c.tagName === "LI" &&
+			(c as HTMLElement).dataset[LINE_ATTR] !== undefined,
 	) as HTMLElement[];
 	const sourceIdxInParent = sameLevel.indexOf(sourceLi);
 	if (sourceIdxInParent < 0) return null;
 	const start = sourceIdxInParent - sourceIdx;
 	const end = start + count;
 	if (start < 0 || end > sameLevel.length) return null;
-	return sameLevel.slice(start, end);
+	return sameLevel.slice(start, end).map((el) => [el]);
 }
 
 async function commitMove(
@@ -126,7 +143,9 @@ async function commitMove(
 		const lines = text.split("\n");
 		const fresh = findGroup(lines, anchorLine);
 		if (!fresh) return text;
-		const freshFrom = fresh.items.findIndex((it) => it.startLine === anchorLine);
+		const freshFrom = fresh.items.findIndex(
+			(it) => it.startLine === anchorLine,
+		);
 		if (freshFrom < 0) return text;
 		const result = moveItem(text, fresh, freshFrom, toIdx);
 		if (!result) return text;

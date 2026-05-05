@@ -4,6 +4,7 @@ import {
 	ViewUpdate,
 	PluginValue,
 } from "@codemirror/view";
+import { foldCode, unfoldCode, foldedRanges } from "@codemirror/language";
 import { Platform } from "obsidian";
 import { findGroup, Group } from "../list/parse";
 import { moveItem } from "../list/reorder";
@@ -18,6 +19,8 @@ const OVERLAY_CLASS = "dli-cm-overlay";
 interface HandleEntry {
 	handle: HTMLElement;
 	cleanup: () => void;
+	lineNum: number;
+	indent: number;
 }
 
 export function buildLivePreviewExtension() {
@@ -28,6 +31,8 @@ export function buildLivePreviewExtension() {
 			handles = new Map<HTMLElement, HandleEntry>();
 			scheduled = false;
 			scrollListener: () => void;
+			hoveredLineEl: HTMLElement | null = null;
+			hoverPending = false;
 
 			constructor(view: EditorView) {
 				this.view = view;
@@ -82,7 +87,21 @@ export function buildLivePreviewExtension() {
 					const r = lineEl.getBoundingClientRect();
 					const top = r.top - overlayRect.top;
 					const offset = Platform.isMobile ? 18 : 14;
-					const left = r.left - overlayRect.left - offset;
+
+					let contentLeft: number | null = null;
+					try {
+						const linePos = this.view.posAtDOM(lineEl);
+						const line = this.view.state.doc.lineAt(linePos);
+						const text = line.text;
+						const indent = /^\s*/.exec(text)?.[0].length ?? 0;
+						const coords = this.view.coordsAtPos(line.from + indent);
+						if (coords) contentLeft = coords.left;
+						entry.lineNum = line.number - 1;
+						entry.indent = indent;
+					} catch {}
+
+					const anchorLeft = contentLeft ?? r.left;
+					const left = anchorLeft - overlayRect.left - offset;
 					entry.handle.style.top = `${top}px`;
 					entry.handle.style.left = `${left}px`;
 					entry.handle.style.height = `${r.height}px`;
@@ -103,16 +122,12 @@ export function buildLivePreviewExtension() {
 				handle.textContent = "⋮⋮";
 				handle.draggable = false;
 
-				const showOn = () => handle.classList.add(SHOW_CLASS);
-				const showOff = (e: MouseEvent) => {
-					const to = e.relatedTarget as Node | null;
-					if (to && (to === handle || to === lineEl || lineEl.contains(to))) return;
-					handle.classList.remove(SHOW_CLASS);
-				};
-				lineEl.addEventListener("mouseenter", showOn);
-				lineEl.addEventListener("mouseleave", showOff);
-				handle.addEventListener("mouseenter", showOn);
-				handle.addEventListener("mouseleave", showOff);
+				const onEnter = () => this.setHover(lineEl);
+				const onLeave = () => this.setHover(null);
+				lineEl.addEventListener("mouseenter", onEnter);
+				lineEl.addEventListener("mouseleave", onLeave);
+				handle.addEventListener("mouseenter", onEnter);
+				handle.addEventListener("mouseleave", onLeave);
 
 				const onDown = (ev: PointerEvent) => {
 					if (ev.button !== 0) return;
@@ -123,12 +138,76 @@ export function buildLivePreviewExtension() {
 				handle.addEventListener("pointerdown", onDown);
 				handle.addEventListener("mousedown", (ev) => ev.preventDefault());
 				handle.addEventListener("dragstart", (ev) => ev.preventDefault());
+				handle.addEventListener("contextmenu", (ev) => {
+					ev.preventDefault();
+					ev.stopPropagation();
+					this.toggleFold(lineEl);
+				});
 
 				const cleanup = () => {
-					lineEl.removeEventListener("mouseenter", showOn);
-					lineEl.removeEventListener("mouseleave", showOff);
+					lineEl.removeEventListener("mouseenter", onEnter);
+					lineEl.removeEventListener("mouseleave", onLeave);
 				};
-				return { handle, cleanup };
+				return { handle, cleanup, lineNum: -1, indent: 0 };
+			}
+
+			setHover(lineEl: HTMLElement | null): void {
+				this.hoveredLineEl = lineEl;
+				if (this.hoverPending) return;
+				this.hoverPending = true;
+				requestAnimationFrame(() => {
+					this.hoverPending = false;
+					this.reconcileHover();
+				});
+			}
+
+			reconcileHover(): void {
+				for (const e of this.handles.values()) {
+					e.handle.classList.remove(SHOW_CLASS);
+				}
+				const lineEl = this.hoveredLineEl;
+				if (!lineEl) return;
+				const target = this.handles.get(lineEl);
+				if (!target) return;
+				target.handle.classList.add(SHOW_CLASS);
+				let currentIndent = target.indent;
+				if (currentIndent === 0) return;
+				const candidates = Array.from(this.handles.values())
+					.filter((e) => e.lineNum < target.lineNum && e.indent < target.indent)
+					.sort((a, b) => b.lineNum - a.lineNum);
+				for (const e of candidates) {
+					if (e.indent < currentIndent) {
+						e.handle.classList.add(SHOW_CLASS);
+						currentIndent = e.indent;
+						if (currentIndent === 0) return;
+					}
+				}
+			}
+
+			toggleFold(lineEl: HTMLElement): void {
+				const view = this.view;
+				const chevron = lineEl.querySelector(
+					".cm-fold-indicator, .collapse-icon, [class*='fold-indicator']",
+				) as HTMLElement | null;
+				if (chevron) {
+					chevron.click();
+					return;
+				}
+
+				const pos = view.posAtDOM(lineEl);
+				const line = view.state.doc.lineAt(pos);
+				const selection = { anchor: line.from };
+				let folded: { from: number; to: number } | null = null;
+				const ranges = foldedRanges(view.state);
+				ranges.between(line.from, line.to, (from, to) => {
+					if (from <= line.to) folded = { from, to };
+				});
+				view.dispatch({ selection });
+				if (folded) {
+					unfoldCode(view);
+				} else {
+					foldCode(view);
+				}
 			}
 
 			onHandle(ev: PointerEvent, lineEl: HTMLElement): void {
@@ -145,25 +224,35 @@ export function buildLivePreviewExtension() {
 				);
 				if (sourceItemIdx < 0) return;
 
-				const groupEls: (HTMLElement | null)[] = group.items.map((it) => {
-					const linePos = view.state.doc.line(it.startLine + 1).from;
-					const dom = view.domAtPos(linePos).node;
-					let el: HTMLElement | null =
-						dom.nodeType === Node.ELEMENT_NODE
-							? (dom as HTMLElement)
-							: dom.parentElement;
-					while (el && !el.classList.contains("cm-line")) {
-						el = el.parentElement;
+				const lineMap = new Map<number, HTMLElement>();
+				const cmLines = view.contentDOM.querySelectorAll(".cm-line");
+				for (const node of Array.from(cmLines)) {
+					const lineEl2 = node as HTMLElement;
+					try {
+						const p = view.posAtDOM(lineEl2);
+						const num = view.state.doc.lineAt(p).number - 1;
+						lineMap.set(num, lineEl2);
+					} catch {
+						/* skip */
 					}
-					return el;
-				});
-				if (groupEls.some((e) => e === null)) return;
+				}
+
+				const groupEls: HTMLElement[][] = [];
+				for (const it of group.items) {
+					const els: HTMLElement[] = [];
+					for (let ln = it.startLine; ln <= it.endLine; ln++) {
+						const el = lineMap.get(ln);
+						if (el) els.push(el);
+					}
+					if (els.length === 0) return;
+					groupEls.push(els);
+				}
 
 				const session: DragSession = {
 					group,
 					sourceItemIdx,
 					sourceEl: lineEl,
-					groupEls: groupEls as HTMLElement[],
+					groupEls,
 					commit: ({ fromIdx, toIdx, group: g }) => {
 						commitMoveCM(view, g, fromIdx, toIdx);
 					},

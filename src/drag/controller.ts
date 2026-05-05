@@ -1,3 +1,4 @@
+/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { DragSession } from "./types";
 
 let cancelActive: (() => void) | null = null;
@@ -6,8 +7,15 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	cancelDrag();
 	ev.preventDefault();
 
-	const srcRect = session.sourceEl.getBoundingClientRect();
-	const ghost = buildGhost(session.sourceEl, srcRect);
+	const srcEls = session.groupEls[session.sourceItemIdx];
+	if (!srcEls || srcEls.length === 0) return;
+	const srcRect = unionRect(srcEls);
+	const sourceParent = session.sourceEl.parentElement;
+	const anchorLeft = sourceParent
+		? sourceParent.getBoundingClientRect().left
+		: srcRect.left;
+
+	const ghost = buildGhost(session.sourceEl, srcEls, srcRect);
 	document.body.appendChild(ghost);
 
 	const indicator = document.createElement("div");
@@ -17,7 +25,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 
 	session.sourceEl.classList.add("dli-dragging");
 
-	const offsetX = ev.clientX - srcRect.left;
+	const offsetX = ev.clientX - anchorLeft;
 	const offsetY = ev.clientY - srcRect.top;
 	const pointerId = ev.pointerId;
 	let targetIdx: number | null = null;
@@ -78,16 +86,94 @@ export function cancelDrag(): void {
 	if (cancelActive) cancelActive();
 }
 
-function buildGhost(src: HTMLElement, rect: DOMRect): HTMLElement {
-	const ghost = src.cloneNode(true) as HTMLElement;
-	ghost.classList.add("dli-ghost");
-	ghost.classList.remove("dli-dragging");
-	ghost.style.width = `${rect.width}px`;
-	ghost.style.height = `${rect.height}px`;
-	ghost.style.left = `${rect.left}px`;
-	ghost.style.top = `${rect.top}px`;
-	const handles = ghost.querySelectorAll(".dli-handle");
-	handles.forEach((h) => h.remove());
+function freezeStyles(src: HTMLElement, clone: HTMLElement): void {
+	const cs = window.getComputedStyle(src);
+	for (let i = 0; i < cs.length; i++) {
+		const prop = cs[i]!;
+		clone.style.setProperty(prop, cs.getPropertyValue(prop));
+	}
+	const srcChildren = src.children;
+	const cloneChildren = clone.children;
+	const n = Math.min(srcChildren.length, cloneChildren.length);
+	for (let i = 0; i < n; i++) {
+		freezeStyles(
+			srcChildren[i] as HTMLElement,
+			cloneChildren[i] as HTMLElement,
+		);
+	}
+}
+
+function unionRect(els: HTMLElement[]): DOMRect {
+	let top = Infinity;
+	let left = Infinity;
+	let right = -Infinity;
+	let bottom = -Infinity;
+	for (const el of els) {
+		const r = el.getBoundingClientRect();
+		if (r.top < top) top = r.top;
+		if (r.left < left) left = r.left;
+		if (r.right > right) right = r.right;
+		if (r.bottom > bottom) bottom = r.bottom;
+	}
+	return new DOMRect(left, top, right - left, bottom - top);
+}
+
+function buildGhost(
+	anchor: HTMLElement,
+	srcEls: HTMLElement[],
+	srcRect: DOMRect,
+): HTMLElement {
+	const ghost = document.createElement("div");
+	ghost.className = "dli-ghost markdown-rendered";
+
+	const parent = anchor.parentElement;
+	const useListContext =
+		srcEls.length === 1 &&
+		parent !== null &&
+		(parent.tagName === "OL" || parent.tagName === "UL");
+
+	if (useListContext && parent) {
+		const liClone = anchor.cloneNode(true) as HTMLElement;
+		liClone.classList.remove("dli-dragging");
+		liClone
+			.querySelectorAll(
+				".dli-handle, .list-collapse-indicator, .collapse-icon, .cm-fold-indicator",
+			)
+			.forEach((h) => h.remove());
+
+		const list = parent.cloneNode(false) as HTMLElement;
+		if (parent.tagName === "OL") {
+			const lis = Array.from(parent.children).filter(
+				(c) => c.tagName === "LI",
+			) as HTMLElement[];
+			const idx = lis.indexOf(anchor);
+			const baseStart = parseInt(parent.getAttribute("start") ?? "1", 10);
+			list.setAttribute("start", String(baseStart + idx));
+		}
+		list.appendChild(liClone);
+		ghost.appendChild(list);
+
+		const parentRect = parent.getBoundingClientRect();
+		ghost.style.left = `${parentRect.left}px`;
+		ghost.style.width = `${parentRect.width}px`;
+	} else {
+		for (const el of srcEls) {
+			const clone = el.cloneNode(true) as HTMLElement;
+			clone.classList.remove("dli-dragging");
+			clone
+				.querySelectorAll(
+					".dli-handle, .list-collapse-indicator, .collapse-icon, .cm-fold-indicator",
+				)
+				.forEach((h) => h.remove());
+			freezeStyles(el, clone);
+			ghost.appendChild(clone);
+		}
+		ghost.style.left = `${srcRect.left}px`;
+		ghost.style.width = `${srcRect.width}px`;
+	}
+
+	ghost.style.top = `${srcRect.top}px`;
+	ghost.style.height = `${srcRect.height}px`;
 	return ghost;
 }
 
@@ -96,12 +182,8 @@ function positionGhost(ghost: HTMLElement, x: number, y: number): void {
 	ghost.style.top = `${y}px`;
 }
 
-function hitTest(
-	session: DragSession,
-	x: number,
-	y: number,
-): number | null {
-	const rects = session.groupEls.map((el) => el.getBoundingClientRect());
+function hitTest(session: DragSession, x: number, y: number): number | null {
+	const rects = session.groupEls.map((els) => unionRect(els));
 	if (rects.length === 0) return null;
 
 	const first = rects[0]!;
@@ -134,11 +216,14 @@ function updateIndicator(
 		indicator.style.display = "none";
 		return;
 	}
-	if (target === session.sourceItemIdx || target === session.sourceItemIdx + 1) {
+	if (
+		target === session.sourceItemIdx ||
+		target === session.sourceItemIdx + 1
+	) {
 		indicator.style.display = "none";
 		return;
 	}
-	const rects = session.groupEls.map((el) => el.getBoundingClientRect());
+	const rects = session.groupEls.map((els) => unionRect(els));
 	let y: number;
 	let left: number;
 	let width: number;

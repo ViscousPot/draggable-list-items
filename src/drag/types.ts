@@ -12,6 +12,6 @@ export interface DragSession {
 	group: Group;
 	sourceItemIdx: number;
 	sourceEl: HTMLElement;
-	groupEls: HTMLElement[];
+	groupEls: HTMLElement[][];
 	commit: CommitFn;
 }

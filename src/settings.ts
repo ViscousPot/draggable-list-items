@@ -30,5 +30,9 @@ export class DraggableListSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}),
 			);
+
+		new Setting(containerEl).setName("Collapse list items").setDesc(
+			"The drag handle replaces the collapse chevron. Right-click the handle on a collapsible list item to collapse or expand it.",
+		);
 	}
 }
