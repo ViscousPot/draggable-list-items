@@ -68,10 +68,10 @@ export function buildLivePreviewExtension() {
 
 			scan(): void {
 				const lineEls = Array.from(
-					this.view.contentDOM.querySelectorAll(
+					this.view.contentDOM.querySelectorAll<HTMLElement>(
 						".cm-line.HyperMD-list-line, .cm-line.HyperMD-task-line",
 					),
-				) as HTMLElement[];
+				);
 
 				const seen = new Set<HTMLElement>();
 				const overlayRect = this.overlay.getBoundingClientRect();
@@ -89,16 +89,15 @@ export function buildLivePreviewExtension() {
 					const offset = Platform.isMobile ? 18 : 14;
 
 					let contentLeft: number | null = null;
-					try {
-						const linePos = this.view.posAtDOM(lineEl);
+					const linePos = this.view.posAtDOM(lineEl);
+					if (linePos >= 0 && linePos <= this.view.state.doc.length) {
 						const line = this.view.state.doc.lineAt(linePos);
-						const text = line.text;
-						const indent = /^\s*/.exec(text)?.[0].length ?? 0;
+						const indent = /^\s*/.exec(line.text)?.[0].length ?? 0;
 						const coords = this.view.coordsAtPos(line.from + indent);
 						if (coords) contentLeft = coords.left;
 						entry.lineNum = line.number - 1;
 						entry.indent = indent;
-					} catch {}
+					}
 
 					const anchorLeft = contentLeft ?? r.left;
 					const left = anchorLeft - overlayRect.left - offset;
@@ -186,9 +185,9 @@ export function buildLivePreviewExtension() {
 
 			toggleFold(lineEl: HTMLElement): void {
 				const view = this.view;
-				const chevron = lineEl.querySelector(
+				const chevron = lineEl.querySelector<HTMLElement>(
 					".cm-fold-indicator, .collapse-icon, [class*='fold-indicator']",
-				) as HTMLElement | null;
+				);
 				if (chevron) {
 					chevron.click();
 					return;
