@@ -2,6 +2,7 @@ import { Plugin, Platform } from "obsidian";
 import { DEFAULT_SETTINGS, DraggableListSettings, DraggableListSettingTab } from "./settings";
 import { attachReadingViewHandles } from "./views/reading-view";
 import { buildLivePreviewExtension } from "./views/live-preview";
+import { cancelDrag } from "./drag/controller";
 
 export default class DraggableListItemsPlugin extends Plugin {
 	settings: DraggableListSettings;
@@ -24,6 +25,7 @@ export default class DraggableListItemsPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		cancelDrag();
 		document.body.classList.remove("dli-mobile", "dli-enabled");
 		document.querySelectorAll(".dli-handle, .dli-ghost, .dli-drop-line, .dli-cm-overlay").forEach((el) => el.remove());
 	}
