@@ -2,11 +2,16 @@
 	position: relative;
 }
 
-.markdown-rendered .list-collapse-indicator,
-.markdown-rendered .collapse-icon,
-.cm-line .cm-fold-indicator {
+body.dli-enabled .markdown-rendered .list-collapse-indicator,
+body.dli-enabled .markdown-rendered .collapse-icon,
+body.dli-enabled .cm-line .cm-fold-indicator {
 	opacity: 0;
 	pointer-events: none;
+}
+
+body:not(.dli-enabled) .dli-handle,
+body:not(.dli-enabled) .markdown-rendered li > .dli-handle {
+	display: none;
 }
 
 .dli-cm-overlay {

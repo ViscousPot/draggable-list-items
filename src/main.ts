@@ -12,9 +12,9 @@ export default class DraggableListItemsPlugin extends Plugin {
 		if (Platform.isMobile) {
 			document.body.classList.add("dli-mobile");
 		}
+		this.applyEnabled();
 
 		this.registerMarkdownPostProcessor((el, ctx) => {
-			if (!this.settings.enabled) return;
 			attachReadingViewHandles(this.app, el, ctx);
 		});
 
@@ -24,8 +24,12 @@ export default class DraggableListItemsPlugin extends Plugin {
 	}
 
 	onunload(): void {
-		document.body.classList.remove("dli-mobile");
+		document.body.classList.remove("dli-mobile", "dli-enabled");
 		document.querySelectorAll(".dli-handle, .dli-ghost, .dli-drop-line, .dli-cm-overlay").forEach((el) => el.remove());
+	}
+
+	applyEnabled(): void {
+		document.body.classList.toggle("dli-enabled", this.settings.enabled);
 	}
 
 	async loadSettings() {
@@ -38,5 +42,6 @@ export default class DraggableListItemsPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		this.applyEnabled();
 	}
 }
