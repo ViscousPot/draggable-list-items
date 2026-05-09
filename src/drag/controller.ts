@@ -1,4 +1,3 @@
-/* eslint-disable obsidianmd/no-static-styles-assignment */
 import { DragSession } from "./types";
 
 let cancelActive: (() => void) | null = null;
@@ -20,7 +19,6 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 
 	const indicator = document.createElement("div");
 	indicator.className = "dli-drop-line";
-	indicator.style.display = "none";
 	document.body.appendChild(indicator);
 
 	session.sourceEl.classList.add("dli-dragging");
@@ -213,14 +211,14 @@ function updateIndicator(
 	target: number | null,
 ): void {
 	if (target === null) {
-		indicator.style.display = "none";
+		indicator.classList.remove("dli-visible");
 		return;
 	}
 	if (
 		target === session.sourceItemIdx ||
 		target === session.sourceItemIdx + 1
 	) {
-		indicator.style.display = "none";
+		indicator.classList.remove("dli-visible");
 		return;
 	}
 	const rects = session.groupEls.map((els) => unionRect(els));
@@ -244,7 +242,7 @@ function updateIndicator(
 		left = Math.min(a.left, b.left);
 		width = Math.max(a.right, b.right) - left;
 	}
-	indicator.style.display = "block";
+	indicator.classList.add("dli-visible");
 	indicator.style.left = `${left}px`;
 	indicator.style.top = `${y - 1}px`;
 	indicator.style.width = `${width}px`;

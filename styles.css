@@ -115,4 +115,9 @@ body.dli-mobile .markdown-rendered li > .dli-handle {
 	z-index: 9998;
 	border-radius: 2px;
 	box-shadow: 0 0 0 1px var(--background-primary);
+	display: none;
+}
+
+.dli-drop-line.dli-visible {
+	display: block;
 }
