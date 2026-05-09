@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-misused-promises */
 import { App, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { findGroup, parseLine } from "../list/parse";
 import { moveItem } from "../list/reorder";
@@ -50,11 +49,13 @@ function addHandle(li: HTMLLIElement, app: App, sourcePath: string): void {
 		handle.classList.remove(SHOW_CLASS),
 	);
 
-	handle.addEventListener("pointerdown", async (ev) => {
+	handle.addEventListener("pointerdown", (ev) => {
 		if (ev.button !== 0) return;
 		ev.preventDefault();
 		ev.stopPropagation();
-		await onHandlePointerDown(ev, li, app, sourcePath);
+		onHandlePointerDown(ev, li, app, sourcePath).catch((err) =>
+			console.error(err),
+		);
 	});
 	handle.addEventListener("mousedown", (ev) => ev.preventDefault());
 	handle.addEventListener("dragstart", (ev) => ev.preventDefault());
