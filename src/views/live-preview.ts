@@ -60,7 +60,7 @@ export function buildLivePreviewExtension() {
 			schedule(): void {
 				if (this.scheduled) return;
 				this.scheduled = true;
-				requestAnimationFrame(() => {
+				window.requestAnimationFrame(() => {
 					this.scheduled = false;
 					this.scan();
 				});
@@ -154,7 +154,7 @@ export function buildLivePreviewExtension() {
 				this.hoveredLineEl = lineEl;
 				if (this.hoverPending) return;
 				this.hoverPending = true;
-				requestAnimationFrame(() => {
+				window.requestAnimationFrame(() => {
 					this.hoverPending = false;
 					this.reconcileHover();
 				});
