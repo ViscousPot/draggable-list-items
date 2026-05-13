@@ -11,7 +11,7 @@ export default class DraggableListItemsPlugin extends Plugin {
 		await this.loadSettings();
 
 		if (Platform.isMobile) {
-			document.body.classList.add("dli-mobile");
+			activeDocument.body.classList.add("dli-mobile");
 		}
 		this.applyEnabled();
 
@@ -26,12 +26,12 @@ export default class DraggableListItemsPlugin extends Plugin {
 
 	onunload(): void {
 		cancelDrag();
-		document.body.classList.remove("dli-mobile", "dli-enabled");
-		document.querySelectorAll(".dli-handle, .dli-ghost, .dli-drop-line, .dli-cm-overlay").forEach((el) => el.remove());
+		activeDocument.body.classList.remove("dli-mobile", "dli-enabled");
+		activeDocument.querySelectorAll(".dli-handle, .dli-ghost, .dli-drop-line, .dli-cm-overlay").forEach((el) => el.remove());
 	}
 
 	applyEnabled(): void {
-		document.body.classList.toggle("dli-enabled", this.settings.enabled);
+		activeDocument.body.classList.toggle("dli-enabled", this.settings.enabled);
 	}
 
 	async loadSettings() {

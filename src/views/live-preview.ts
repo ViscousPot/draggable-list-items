@@ -36,7 +36,7 @@ export function buildLivePreviewExtension() {
 
 			constructor(view: EditorView) {
 				this.view = view;
-				this.overlay = document.createElement("div");
+				this.overlay = activeDocument.createElement("div");
 				this.overlay.className = OVERLAY_CLASS;
 				view.scrollDOM.appendChild(this.overlay);
 				this.scrollListener = () => this.schedule();
@@ -116,7 +116,7 @@ export function buildLivePreviewExtension() {
 			}
 
 			createHandle(lineEl: HTMLElement): HandleEntry {
-				const handle = document.createElement("span");
+				const handle = activeDocument.createElement("span");
 				handle.className = `${HANDLE_CLASS} ${HANDLE_CM_CLASS}`;
 				handle.textContent = "⋮⋮";
 				handle.draggable = false;

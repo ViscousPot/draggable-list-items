@@ -15,11 +15,11 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		: srcRect.left;
 
 	const ghost = buildGhost(session.sourceEl, srcEls, srcRect);
-	document.body.appendChild(ghost);
+	activeDocument.body.appendChild(ghost);
 
-	const indicator = document.createElement("div");
+	const indicator = activeDocument.createElement("div");
 	indicator.className = "dli-drop-line";
-	document.body.appendChild(indicator);
+	activeDocument.body.appendChild(indicator);
 
 	session.sourceEl.classList.add("dli-dragging");
 
@@ -39,10 +39,10 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	};
 
 	const cleanup = () => {
-		document.removeEventListener("pointermove", onMove);
-		document.removeEventListener("pointerup", onUp);
-		document.removeEventListener("pointercancel", onUp);
-		document.removeEventListener("keydown", onKey, true);
+		activeDocument.removeEventListener("pointermove", onMove);
+		activeDocument.removeEventListener("pointerup", onUp);
+		activeDocument.removeEventListener("pointercancel", onUp);
+		activeDocument.removeEventListener("keydown", onKey, true);
 		ghost.remove();
 		indicator.remove();
 		session.sourceEl.classList.remove("dli-dragging");
@@ -74,10 +74,10 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 
 	cancelActive = cleanup;
 
-	document.addEventListener("pointermove", onMove, { passive: false });
-	document.addEventListener("pointerup", onUp);
-	document.addEventListener("pointercancel", onUp);
-	document.addEventListener("keydown", onKey, true);
+	activeDocument.addEventListener("pointermove", onMove, { passive: false });
+	activeDocument.addEventListener("pointerup", onUp);
+	activeDocument.addEventListener("pointercancel", onUp);
+	activeDocument.addEventListener("keydown", onKey, true);
 }
 
 export function cancelDrag(): void {
@@ -121,7 +121,7 @@ function buildGhost(
 	srcEls: HTMLElement[],
 	srcRect: DOMRect,
 ): HTMLElement {
-	const ghost = document.createElement("div");
+	const ghost = activeDocument.createElement("div");
 	ghost.className = "dli-ghost markdown-rendered";
 
 	const parent = anchor.parentElement;

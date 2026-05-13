@@ -39,7 +39,7 @@ export function attachReadingViewHandles(
 
 function addHandle(li: HTMLLIElement, app: App, sourcePath: string): void {
 	if (li.querySelector(`:scope > .${HANDLE_CLASS}`)) return;
-	const handle = document.createElement("span");
+	const handle = activeDocument.createElement("span");
 	handle.className = HANDLE_CLASS;
 	handle.textContent = "⋮⋮";
 	handle.draggable = false;
