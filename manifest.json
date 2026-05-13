@@ -1,11 +1,11 @@
 {
-  "id": "draggable-list-items",
-  "name": "Draggable List Items",
-  "version": "0.2.4",
-  "minAppVersion": "1.5.7",
-  "description": "Drag list items to reorder them.",
-  "author": "ViscousPotential",
-  "authorUrl": "https://github.com/ViscousPot",
-  "fundingUrl": "https://github.com/sponsors/ViscousPot",
-  "isDesktopOnly": false
+	"id": "draggable-list-items",
+	"name": "Draggable List Items",
+	"version": "0.2.5",
+	"minAppVersion": "1.5.7",
+	"description": "Drag list items to reorder them.",
+	"author": "ViscousPotential",
+	"authorUrl": "https://github.com/ViscousPot",
+	"fundingUrl": "https://github.com/sponsors/ViscousPot",
+	"isDesktopOnly": false
 }
