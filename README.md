@@ -11,13 +11,34 @@ Works in reading view and live preview, on desktop and mobile. Tasks (`- [ ]`), 
 
 ## Usage
 
-Hover a list item to reveal the handle, then drag. On mobile the handle is always visible.
+Hover a list item to reveal the handle, then drag. On mobile the handle is always visible. A ghost preview follows the cursor and a drop indicator line shows where the item will land.
 
 `Esc` cancels an in-progress drag.
 
+### Collapse / expand
+
+Right-click the handle on a collapsible list item to toggle its collapsed state. The handle replaces the default collapse chevron.
+
+### Cross-group drag
+
+Enable **Cross-group drag** in settings to drag items between separate lists at the same indent level (e.g., between two bullet lists).
+
+### Cross-file drag
+
+Enable **Cross-file drag** in settings to drag items between different files across editor panes. Live preview only.
+
+## Settings
+
+Open **Settings → Community plugins → Draggable List Items**:
+
+- **Enable drag handles** -- Show or hide all drag handles.
+- **Enable cross-group drag** -- Drag items between groups at the same indent.
+- **Enable cross-file drag** -- Drag items across files in different editor panes (live preview only).
+- **Collapse list items** -- Info: right-click the handle to collapse or expand.
+
 ## Install
 
-Copy `main.js`, `manifest.json`, and `styles.css` into `<vault>/.obsidian/plugins/draggable-list-items/`, then enable in **Settings → Community plugins**.
+Install from **Settings → Community plugins → Browse** and search for "Draggable List Items", or visit [community.obsidian.md/plugins/draggable-list-items](https://community.obsidian.md/plugins/draggable-list-items).
 
 ## Limitations
 
