@@ -1,7 +1,7 @@
 {
 	"id": "draggable-list-items",
 	"name": "Draggable List Items",
-	"version": "0.2.7",
+	"version": "0.2.8",
 	"minAppVersion": "1.5.7",
 	"description": "Drag list items to reorder them.",
 	"author": "ViscousPotential",
