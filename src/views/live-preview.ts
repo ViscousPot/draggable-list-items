@@ -6,10 +6,11 @@ import {
 } from "@codemirror/view";
 import { foldCode, unfoldCode, foldedRanges } from "@codemirror/language";
 import { Platform } from "obsidian";
-import { findGroup, Group } from "../list/parse";
-import { moveItem } from "../list/reorder";
+import { findAllGroups, Group } from "../list/parse";
+import { moveItemCrossGroup } from "../list/reorder";
 import { beginDrag } from "../drag/controller";
-import { DragSession } from "../drag/types";
+import { DragSession, GroupSlot } from "../drag/types";
+import { DraggableListSettings } from "../settings";
 
 const HANDLE_CLASS = "dli-handle";
 const HANDLE_CM_CLASS = "dli-handle-cm";
@@ -23,7 +24,7 @@ interface HandleEntry {
 	indent: number;
 }
 
-export function buildLivePreviewExtension() {
+export function buildLivePreviewExtension(getSettings: () => DraggableListSettings) {
 	return ViewPlugin.fromClass(
 		class implements PluginValue {
 			view: EditorView;
@@ -33,9 +34,11 @@ export function buildLivePreviewExtension() {
 			scrollListener: () => void;
 			hoveredLineEl: HTMLElement | null = null;
 			hoverPending = false;
+			getSettings: () => DraggableListSettings;
 
 			constructor(view: EditorView) {
 				this.view = view;
+				this.getSettings = getSettings;
 				this.overlay = activeDocument.createElement("div");
 				this.overlay.className = OVERLAY_CLASS;
 				view.scrollDOM.appendChild(this.overlay);
@@ -215,9 +218,14 @@ export function buildLivePreviewExtension() {
 				const lineNum = view.state.doc.lineAt(pos).number - 1;
 				const docText = view.state.doc.toString();
 				const lines = docText.split("\n");
-				const group = findGroup(lines, lineNum);
-				if (!group || group.items.length < 2) return;
 
+				const allGroups = findAllGroups(lines);
+				const groupIdx = allGroups.findIndex((g) =>
+					g.items.some((it) => it.startLine === lineNum),
+				);
+				if (groupIdx < 0) return;
+
+				const group = allGroups[groupIdx]!;
 				const sourceItemIdx = group.items.findIndex(
 					(it) => it.startLine === lineNum,
 				);
@@ -236,24 +244,38 @@ export function buildLivePreviewExtension() {
 					}
 				}
 
-				const groupEls: HTMLElement[][] = [];
-				for (const it of group.items) {
-					const els: HTMLElement[] = [];
-					for (let ln = it.startLine; ln <= it.endLine; ln++) {
-						const el = lineMap.get(ln);
-						if (el) els.push(el);
+				const allGroupSlots: GroupSlot[] = [];
+				for (const g of allGroups) {
+					const groupEls: HTMLElement[][] = [];
+					const itemRects: DOMRect[] = [];
+					for (const item of g.items) {
+						const els: HTMLElement[] = [];
+						for (let ln = item.startLine; ln <= item.endLine; ln++) {
+							const el = lineMap.get(ln);
+							if (el) els.push(el);
+						}
+						if (els.length === 0) continue;
+						groupEls.push(els);
+						const r = els[0]!.getBoundingClientRect();
+						itemRects.push(r);
 					}
-					if (els.length === 0) return;
-					groupEls.push(els);
+					if (groupEls.length === 0) continue;
+					allGroupSlots.push({ group: g, groupEls, itemRects });
 				}
 
+				const sourceSlot = allGroupSlots[groupIdx]!;
+				if (sourceSlot.groupEls.length === 0) return;
+
+				const settings = this.getSettings();
 				const session: DragSession = {
 					group,
 					sourceItemIdx,
 					sourceEl: lineEl,
-					groupEls,
-					commit: ({ fromIdx, toIdx, group: g }) => {
-						commitMoveCM(view, g, fromIdx, toIdx);
+					groupEls: sourceSlot.groupEls,
+					allGroups: allGroupSlots,
+					enableCrossGroupDrag: settings.enableCrossGroupDrag,
+					commit: ({ fromIdx, toIdx, fromGroup, toGroup }) => {
+						commitMoveCM(view, fromGroup, fromIdx, toGroup, toIdx);
 					},
 				};
 
@@ -265,27 +287,47 @@ export function buildLivePreviewExtension() {
 
 function commitMoveCM(
 	view: EditorView,
-	staleGroup: Group,
+	fromGroup: Group,
 	fromIdx: number,
+	toGroup: Group,
 	toIdx: number,
 ): void {
-	const anchorLine = staleGroup.items[fromIdx]?.startLine;
+	const anchorLine = fromGroup.items[fromIdx]?.startLine;
 	if (anchorLine === undefined) return;
 	const docText = view.state.doc.toString();
 	const lines = docText.split("\n");
-	const fresh = findGroup(lines, anchorLine);
-	if (!fresh) return;
-	const freshFrom = fresh.items.findIndex((it) => it.startLine === anchorLine);
-	if (freshFrom < 0) return;
-	const result = moveItem(docText, fresh, freshFrom, toIdx);
+	const allGroups = findAllGroups(lines);
+
+	const freshFrom = allGroups.find((g) =>
+		g.items.some((it) => it.startLine === anchorLine),
+	);
+	if (!freshFrom) return;
+	const freshFromIdx = freshFrom.items.findIndex(
+		(it) => it.startLine === anchorLine,
+	);
+	if (freshFromIdx < 0) return;
+
+	const targetAnchor = toGroup.items[0]!.startLine;
+	const freshTo = allGroups.find((g) =>
+		g.items.some((it) => it.startLine === targetAnchor),
+	);
+	if (!freshTo) return;
+
+	const result = moveItemCrossGroup(docText, freshFrom, freshFromIdx, freshTo, toIdx);
 	if (!result) return;
 
-	const groupStartLine = fresh.items[0]!.startLine;
-	const groupEndLine = fresh.items[fresh.items.length - 1]!.endLine;
-	const from = view.state.doc.line(groupStartLine + 1).from;
-	const to = view.state.doc.line(groupEndLine + 1).to;
-	const newLines = result.text.split("\n");
-	const newSlice = newLines.slice(groupStartLine, groupEndLine + 1).join("\n");
+	const newLines = result.split("\n");
+	const affectedStart = Math.min(
+		freshFrom.items[0]!.startLine,
+		freshTo.items[0]!.startLine,
+	);
+	const affectedEnd = Math.max(
+		freshFrom.items[freshFrom.items.length - 1]!.endLine,
+		freshTo.items[freshTo.items.length - 1]!.endLine,
+	);
+	const from = view.state.doc.line(affectedStart + 1).from;
+	const to = view.state.doc.line(affectedEnd + 1).to;
+	const newSlice = newLines.slice(affectedStart, affectedEnd + 1).join("\n");
 	view.dispatch({
 		changes: { from, to, insert: newSlice },
 	});

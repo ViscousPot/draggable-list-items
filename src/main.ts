@@ -1,5 +1,9 @@
 import { Plugin, Platform } from "obsidian";
-import { DEFAULT_SETTINGS, DraggableListSettings, DraggableListSettingTab } from "./settings";
+import {
+	DEFAULT_SETTINGS,
+	DraggableListSettings,
+	DraggableListSettingTab,
+} from "./settings";
 import { attachReadingViewHandles } from "./views/reading-view";
 import { buildLivePreviewExtension } from "./views/live-preview";
 import { cancelDrag } from "./drag/controller";
@@ -16,10 +20,12 @@ export default class DraggableListItemsPlugin extends Plugin {
 		this.applyEnabled();
 
 		this.registerMarkdownPostProcessor((el, ctx) => {
-			attachReadingViewHandles(this.app, el, ctx);
+			attachReadingViewHandles(this.app, () => this.settings, el, ctx);
 		});
 
-		this.registerEditorExtension(buildLivePreviewExtension());
+		this.registerEditorExtension(
+			buildLivePreviewExtension(() => this.settings, this.app),
+		);
 
 		this.addSettingTab(new DraggableListSettingTab(this.app, this));
 	}
@@ -27,11 +33,18 @@ export default class DraggableListItemsPlugin extends Plugin {
 	onunload(): void {
 		cancelDrag();
 		activeDocument.body.classList.remove("dli-mobile", "dli-enabled");
-		activeDocument.querySelectorAll(".dli-handle, .dli-ghost, .dli-drop-line, .dli-cm-overlay").forEach((el) => el.remove());
+		activeDocument
+			.querySelectorAll(
+				".dli-handle, .dli-ghost, .dli-drop-line, .dli-cm-overlay",
+			)
+			.forEach((el) => el.remove());
 	}
 
 	applyEnabled(): void {
-		activeDocument.body.classList.toggle("dli-enabled", this.settings.enabled);
+		activeDocument.body.classList.toggle(
+			"dli-enabled",
+			this.settings.enabled,
+		);
 	}
 
 	async loadSettings() {

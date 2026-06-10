@@ -1,8 +1,9 @@
 import { App, MarkdownPostProcessorContext, TFile } from "obsidian";
-import { findGroup, parseLine } from "../list/parse";
-import { moveItem } from "../list/reorder";
+import { findGroup, findAllGroups, parseLine } from "../list/parse";
+import { moveItem, moveItemCrossGroup } from "../list/reorder";
 import { beginDrag } from "../drag/controller";
-import { DragSession } from "../drag/types";
+import { DragSession, GroupSlot } from "../drag/types";
+import { DraggableListSettings } from "../settings";
 
 const HANDLE_CLASS = "dli-handle";
 const SHOW_CLASS = "dli-show";
@@ -10,6 +11,7 @@ const LINE_ATTR = "dliLine";
 
 export function attachReadingViewHandles(
 	app: App,
+	getSettings: () => DraggableListSettings,
 	el: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
 ): void {
@@ -33,11 +35,16 @@ export function attachReadingViewHandles(
 		const li = lis[i]!;
 		const lineNum = startLines[i]!;
 		li.dataset[LINE_ATTR] = String(lineNum);
-		addHandle(li, app, ctx.sourcePath);
+		addHandle(li, app, getSettings, ctx.sourcePath);
 	}
 }
 
-function addHandle(li: HTMLLIElement, app: App, sourcePath: string): void {
+function addHandle(
+	li: HTMLLIElement,
+	app: App,
+	getSettings: () => DraggableListSettings,
+	sourcePath: string,
+): void {
 	if (li.querySelector(`:scope > .${HANDLE_CLASS}`)) return;
 	const handle = activeDocument.createElement("span");
 	handle.className = HANDLE_CLASS;
@@ -53,8 +60,8 @@ function addHandle(li: HTMLLIElement, app: App, sourcePath: string): void {
 		if (ev.button !== 0) return;
 		ev.preventDefault();
 		ev.stopPropagation();
-		onHandlePointerDown(ev, li, app, sourcePath).catch((err) =>
-			console.error(err),
+		onHandlePointerDown(ev, li, app, getSettings, sourcePath).catch(
+			(err) => console.error(err),
 		);
 	});
 	handle.addEventListener("mousedown", (ev) => ev.preventDefault());
@@ -75,8 +82,10 @@ async function onHandlePointerDown(
 	ev: PointerEvent,
 	li: HTMLLIElement,
 	app: App,
+	getSettings: () => DraggableListSettings,
 	sourcePath: string,
 ): Promise<void> {
+	const enableCrossGroupDrag = getSettings().enableCrossGroupDrag;
 	const lineStr = li.dataset[LINE_ATTR];
 	if (!lineStr) return;
 	const sourceLine = parseInt(lineStr, 10);
@@ -87,69 +96,113 @@ async function onHandlePointerDown(
 
 	const text = await app.vault.cachedRead(file);
 	const lines = text.split("\n");
-	const group = findGroup(lines, sourceLine);
-	if (!group || group.items.length < 2) return;
+	const allGroups = findAllGroups(lines);
+	const sourceGroupIdx = allGroups.findIndex((g) =>
+		g.items.some((it) => it.startLine === sourceLine),
+	);
+	if (sourceGroupIdx < 0) return;
+	const group = allGroups[sourceGroupIdx]!;
+	if (!enableCrossGroupDrag && group.items.length < 2) return;
 
 	const sourceItemIdx = group.items.findIndex(
 		(it) => it.startLine === sourceLine,
 	);
 	if (sourceItemIdx < 0) return;
 
-	const groupEls = collectGroupEls(li, group.items.length, sourceItemIdx);
-	if (!groupEls) return;
+	const lineMap = new Map<number, HTMLElement>();
+	for (const liEl of activeDocument.querySelectorAll<HTMLElement>("li")) {
+		const ln = liEl.dataset[LINE_ATTR];
+		if (ln !== undefined) {
+			lineMap.set(parseInt(ln, 10), liEl);
+		}
+	}
+
+	const allGroupSlots: GroupSlot[] = [];
+	for (const g of allGroups) {
+		const groupEls: HTMLElement[][] = [];
+		const itemRects: DOMRect[] = [];
+		for (const item of g.items) {
+			const liEl = lineMap.get(item.startLine);
+			if (!liEl) {
+				groupEls.length = 0;
+				break;
+			}
+			groupEls.push([liEl]);
+			itemRects.push(liEl.getBoundingClientRect());
+		}
+		if (groupEls.length === 0) continue;
+		allGroupSlots.push({ group: g, groupEls, itemRects });
+	}
+
+	const sourceSlot = allGroupSlots[sourceGroupIdx];
+	if (!sourceSlot || sourceSlot.groupEls.length === 0) return;
 
 	const session: DragSession = {
 		group,
 		sourceItemIdx,
 		sourceEl: li,
-		groupEls,
-		commit: async ({ fromIdx, toIdx, group: g }) => {
-			await commitMove(app, file, g, fromIdx, toIdx);
-		},
+		groupEls: sourceSlot.groupEls,
+		allGroups: allGroupSlots,
+		enableCrossGroupDrag,
+		enableCrossFileDrag: false,
+		app,
+		sourceFile: file,
+		queryCrossFile: () => null,
+		commit: ({ fromIdx, toIdx, fromGroup, toGroup }) =>
+			commitMove(app, file, fromGroup, fromIdx, toGroup, toIdx),
 	};
 
 	beginDrag(session, ev);
 }
 
-function collectGroupEls(
-	sourceLi: HTMLLIElement,
-	count: number,
-	sourceIdx: number,
-): HTMLElement[][] | null {
-	const parent = sourceLi.parentElement;
-	if (!parent) return null;
-	const sameLevel = Array.from(parent.children).filter(
-		(c) =>
-			c.tagName === "LI" &&
-			(c as HTMLElement).dataset[LINE_ATTR] !== undefined,
-	) as HTMLElement[];
-	const sourceIdxInParent = sameLevel.indexOf(sourceLi);
-	if (sourceIdxInParent < 0) return null;
-	const start = sourceIdxInParent - sourceIdx;
-	const end = start + count;
-	if (start < 0 || end > sameLevel.length) return null;
-	return sameLevel.slice(start, end).map((el) => [el]);
-}
-
 async function commitMove(
 	app: App,
 	file: TFile,
-	staleGroup: { items: { startLine: number }[] },
+	staleFromGroup: { items: { startLine: number }[] },
 	fromIdx: number,
+	staleToGroup: { items: { startLine: number }[] },
 	toIdx: number,
 ): Promise<void> {
-	const anchorLine = staleGroup.items[fromIdx]?.startLine;
-	if (anchorLine === undefined) return;
+	const fromAnchor = staleFromGroup.items[fromIdx]?.startLine;
+	const toAnchor = staleToGroup.items[0]?.startLine;
+	if (fromAnchor === undefined || toAnchor === undefined) return;
+
+	const sameGroup = staleFromGroup === staleToGroup;
+
 	await app.vault.process(file, (text) => {
+		if (sameGroup) {
+			const lines = text.split("\n");
+			const fresh = findGroup(lines, fromAnchor);
+			if (!fresh) return text;
+			const freshFrom = fresh.items.findIndex(
+				(it) => it.startLine === fromAnchor,
+			);
+			if (freshFrom < 0) return text;
+			const result = moveItem(text, fresh, freshFrom, toIdx);
+			if (!result) return text;
+			return result.text;
+		}
+
 		const lines = text.split("\n");
-		const fresh = findGroup(lines, anchorLine);
-		if (!fresh) return text;
-		const freshFrom = fresh.items.findIndex(
-			(it) => it.startLine === anchorLine,
+		const allGroups = findAllGroups(lines);
+		const freshFrom = allGroups.find((g) =>
+			g.items.some((it) => it.startLine === fromAnchor),
 		);
-		if (freshFrom < 0) return text;
-		const result = moveItem(text, fresh, freshFrom, toIdx);
-		if (!result) return text;
-		return result.text;
+		const freshTo = allGroups.find((g) =>
+			g.items.some((it) => it.startLine === toAnchor),
+		);
+		if (!freshFrom || !freshTo) return text;
+		const freshFromIdx = freshFrom.items.findIndex(
+			(it) => it.startLine === fromAnchor,
+		);
+		if (freshFromIdx < 0) return text;
+		const result = moveItemCrossGroup(
+			text,
+			freshFrom,
+			freshFromIdx,
+			freshTo,
+			toIdx,
+		);
+		return result ?? text;
 	});
 }

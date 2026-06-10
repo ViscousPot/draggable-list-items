@@ -3,10 +3,12 @@ import DraggableListItemsPlugin from "./main";
 
 export interface DraggableListSettings {
 	enabled: boolean;
+	enableCrossGroupDrag: boolean;
 }
 
 export const DEFAULT_SETTINGS: DraggableListSettings = {
 	enabled: true,
+	enableCrossGroupDrag: false,
 };
 
 export class DraggableListSettingTab extends PluginSettingTab {
@@ -27,6 +29,16 @@ export class DraggableListSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.enabled).onChange(async (v) => {
 					this.plugin.settings.enabled = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Enable cross-group drag")
+			.setDesc("Drag list items between groups at the same indent level (e.g., between two separate bullet lists).")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.enableCrossGroupDrag).onChange(async (v) => {
+					this.plugin.settings.enableCrossGroupDrag = v;
 					await this.plugin.saveSettings();
 				}),
 			);

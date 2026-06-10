@@ -150,3 +150,22 @@ export function findGroup(lines: string[], anchorLine: number): Group | null {
 		items,
 	};
 }
+
+export function findAllGroups(lines: string[]): Group[] {
+	const groups: Group[] = [];
+	const seen = new Set<number>();
+
+	for (let i = 0; i < lines.length; i++) {
+		if (!parseLine(lines[i]!)) continue;
+		if (seen.has(i)) continue;
+
+		const group = findGroup(lines, i);
+		if (group) {
+			groups.push(group);
+			for (const item of group.items) {
+				seen.add(item.startLine);
+			}
+		}
+	}
+	return groups;
+}

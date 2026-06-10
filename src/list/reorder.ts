@@ -1,8 +1,52 @@
-import { Group, parseLine } from "./parse";
+import { Group, parseLine, findAllGroups } from "./parse";
 
 export interface MoveResult {
 	text: string;
 	newOrder: number[];
+}
+
+export function moveItemCrossGroup(
+	text: string,
+	fromGroup: Group,
+	fromIdx: number,
+	toGroup: Group,
+	toIdx: number,
+): string | null {
+	if (fromIdx < 0 || fromIdx >= fromGroup.items.length) return null;
+	if (toIdx < 0 || toIdx > toGroup.items.length) return null;
+
+	if (fromGroup === toGroup) {
+		const result = moveItem(text, fromGroup, fromIdx, toIdx);
+		return result ? result.text : null;
+	}
+
+	const lines = text.split("\n");
+	const fromItem = fromGroup.items[fromIdx]!;
+	const sourceStart = fromItem.startLine;
+	const sourceEnd = fromItem.endLine;
+	const sourceLen = sourceEnd - sourceStart + 1;
+
+	const sourceBlock = lines.splice(sourceStart, sourceLen);
+
+	if (fromGroup.kind !== toGroup.kind) {
+		adjustBlockToGroup(sourceBlock, fromGroup, toGroup);
+	}
+
+	const targetStart = toGroup.items[0]!.startLine;
+	const shift = sourceStart < targetStart ? sourceLen : 0;
+	let insertAt = targetStart - shift;
+	for (let i = 0; i < toIdx; i++) {
+		const item = toGroup.items[i]!;
+		insertAt += item.endLine - item.startLine + 1;
+	}
+
+	lines.splice(insertAt, 0, ...sourceBlock);
+
+	let result = lines.join("\n");
+	if (fromGroup.kind === "ordered" || toGroup.kind === "ordered") {
+		result = renumberOrderedInText(result);
+	}
+	return result;
 }
 
 export function moveItem(
@@ -55,4 +99,72 @@ export function moveItem(
 	const after = lines.slice(groupEnd + 1);
 	const newLines = [...before, ...flat, ...after];
 	return { text: newLines.join("\n"), newOrder: order };
+}
+
+function adjustBlockToGroup(
+	block: string[],
+	_fromGroup: Group,
+	toGroup: Group,
+): void {
+	if (block.length === 0) return;
+	const head = block[0]!;
+	const headInfo = parseLine(head);
+	if (!headInfo) return;
+
+	const indent = toGroup.indent;
+	const indentStr = " ".repeat(indent);
+
+	let content: string;
+	if (headInfo.kind === "task") {
+		content = head.replace(/^\s*[-*+]\s+\[[^\]]\]\s/, "");
+	} else if (headInfo.kind === "ordered") {
+		content = head.replace(/^\s*\d+[.)]\s/, "");
+	} else {
+		content = head.replace(/^\s*[-*+]\s+/, "");
+	}
+
+	if (toGroup.kind === "task") {
+		block[0] = `${indentStr}- [ ] ${content}`;
+	} else if (toGroup.kind === "ordered") {
+		block[0] = `${indentStr}1. ${content}`;
+	} else {
+		block[0] = `${indentStr}- ${content}`;
+	}
+
+	if (indent !== headInfo.indent) {
+		const delta = indent - headInfo.indent;
+		for (let i = 1; i < block.length; i++) {
+			const line = block[i]!;
+			if (line.trim() === "") continue;
+			const li = parseLine(line);
+			if (li) {
+				const newIndent = Math.max(0, li.indent + delta);
+				block[i] = " ".repeat(newIndent) + line.slice(li.indent);
+			} else {
+				const ws = /^\s*/.exec(line)?.[0].length ?? 0;
+				const newWs = Math.max(0, ws + delta);
+				block[i] = " ".repeat(newWs) + line.slice(ws);
+			}
+		}
+	}
+}
+
+function renumberOrderedInText(text: string): string {
+	const lines = text.split("\n");
+	const groups = findAllGroups(lines);
+	for (const group of groups) {
+		if (group.kind !== "ordered") continue;
+		for (let i = 0; i < group.items.length; i++) {
+			const item = group.items[i]!;
+			const lineIdx = item.startLine;
+			const line = lines[lineIdx]!;
+			const info = parseLine(line);
+			if (info && info.kind === "ordered") {
+				const sep = info.orderedSep ?? ".";
+				const rest = line.replace(/^\s*\d+[.)]\s/, "");
+				lines[lineIdx] = `${" ".repeat(info.indent)}${i + 1}${sep} ${rest}`;
+			}
+		}
+	}
+	return lines.join("\n");
 }

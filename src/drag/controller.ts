@@ -1,4 +1,5 @@
-import { DragSession } from "./types";
+import { DragSession, GroupSlot } from "./types";
+import { Group } from "../list/parse";
 
 let cancelActive: (() => void) | null = null;
 
@@ -26,7 +27,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	const offsetX = ev.clientX - anchorLeft;
 	const offsetY = ev.clientY - srcRect.top;
 	const pointerId = ev.pointerId;
-	let targetIdx: number | null = null;
+	let target: HitTarget | null = null;
 
 	positionGhost(ghost, ev.clientX - offsetX, ev.clientY - offsetY);
 
@@ -34,8 +35,8 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		if (e.pointerId !== pointerId) return;
 		e.preventDefault();
 		positionGhost(ghost, e.clientX - offsetX, e.clientY - offsetY);
-		targetIdx = hitTest(session, e.clientX, e.clientY);
-		updateIndicator(indicator, session, targetIdx);
+		target = hitTest(session, e.clientX, e.clientY);
+		updateIndicator(indicator, session, target);
 	};
 
 	const cleanup = () => {
@@ -51,18 +52,24 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 
 	const onUp = (e: PointerEvent) => {
 		if (e.pointerId !== pointerId) return;
-		const final = targetIdx;
+		const final = target;
 		cleanup();
-		if (
-			final !== null &&
-			final !== session.sourceItemIdx &&
-			final !== session.sourceItemIdx + 1
-		) {
+		if (final !== null) {
+			const slot = session.allGroups[final.groupSlotIdx];
+			if (!slot) return;
+			if (
+				slot.group === session.group &&
+				(final.itemIdx === session.sourceItemIdx ||
+					final.itemIdx === session.sourceItemIdx + 1)
+			) {
+				return;
+			}
 			Promise.resolve(
 				session.commit({
 					fromIdx: session.sourceItemIdx,
-					toIdx: final,
-					group: session.group,
+					toIdx: final.itemIdx,
+					fromGroup: session.group,
+					toGroup: slot.group,
 				}),
 			).catch((err) => console.error(err));
 		}
@@ -180,64 +187,118 @@ function positionGhost(ghost: HTMLElement, x: number, y: number): void {
 	ghost.style.top = `${y}px`;
 }
 
-function hitTest(session: DragSession, x: number, y: number): number | null {
-	const rects = session.groupEls.map((els) => unionRect(els));
-	if (rects.length === 0) return null;
+interface HitTarget {
+	groupSlotIdx: number;
+	itemIdx: number;
+}
 
-	const first = rects[0]!;
-	const last = rects[rects.length - 1]!;
+function collectDropRects(
+	slots: GroupSlot[],
+	sourceGroup: Group,
+	enableCrossGroupDrag: boolean,
+): { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] {
+	const result: { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] = [];
+	for (let g = 0; g < slots.length; g++) {
+		const slot = slots[g]!;
+		if (slot.group !== sourceGroup) {
+			if (!enableCrossGroupDrag) continue;
+			if (slot.group.indent !== sourceGroup.indent) continue;
+		}
+		for (let i = 0; i < slot.groupEls.length; i++) {
+			const rect = slot.itemRects[i]!;
+			result.push({ groupSlotIdx: g, itemIdx: i, rect });
+		}
+	}
+	result.sort((a, b) => a.rect.top - b.rect.top);
+	return result;
+}
+
+function hitTest(
+	session: DragSession,
+	x: number,
+	y: number,
+): HitTarget | null {
+	const allRects = collectDropRects(
+		session.allGroups,
+		session.group,
+		session.enableCrossGroupDrag,
+	);
+	if (allRects.length === 0) return null;
+
+	const first = allRects[0]!.rect;
+	const last = allRects[allRects.length - 1]!.rect;
 	const slack = 24;
-	const minLeft = Math.min(...rects.map((r) => r.left)) - slack;
-	const maxRight = Math.max(...rects.map((r) => r.right)) + slack;
+	const minLeft = Math.min(...allRects.map((r) => r.rect.left)) - slack;
+	const maxRight = Math.max(...allRects.map((r) => r.rect.right)) + slack;
 	if (x < minLeft || x > maxRight) return null;
 	if (y < first.top - slack) return null;
 	if (y > last.bottom + slack) return null;
 
-	if (y <= first.top) return 0;
-	if (y >= last.bottom) return rects.length;
-
-	for (let i = 0; i < rects.length; i++) {
-		const r = rects[i]!;
-		const mid = r.top + r.height / 2;
-		if (y < mid) return i;
-		if (y < r.bottom) return i + 1;
+	if (y <= first.top) {
+		return { groupSlotIdx: allRects[0]!.groupSlotIdx, itemIdx: allRects[0]!.itemIdx };
 	}
-	return rects.length;
+	if (y >= last.bottom) {
+		const lastItem = allRects[allRects.length - 1]!;
+		return { groupSlotIdx: lastItem.groupSlotIdx, itemIdx: lastItem.itemIdx + 1 };
+	}
+
+	for (let i = 0; i < allRects.length; i++) {
+		const r = allRects[i]!.rect;
+		const mid = r.top + r.height / 2;
+		if (y < mid) {
+			return { groupSlotIdx: allRects[i]!.groupSlotIdx, itemIdx: allRects[i]!.itemIdx };
+		}
+		if (y < r.bottom) {
+			const next = allRects[i + 1];
+			if (next) {
+				return { groupSlotIdx: next.groupSlotIdx, itemIdx: next.itemIdx };
+			}
+			return { groupSlotIdx: allRects[i]!.groupSlotIdx, itemIdx: allRects[i]!.itemIdx + 1 };
+		}
+	}
+	const lastItem = allRects[allRects.length - 1]!;
+	return { groupSlotIdx: lastItem.groupSlotIdx, itemIdx: lastItem.itemIdx + 1 };
 }
 
 function updateIndicator(
 	indicator: HTMLElement,
 	session: DragSession,
-	target: number | null,
+	target: HitTarget | null,
 ): void {
 	if (target === null) {
 		indicator.classList.remove("dli-visible");
 		return;
 	}
+	const slot = session.allGroups[target.groupSlotIdx];
+	if (!slot) {
+		indicator.classList.remove("dli-visible");
+		return;
+	}
 	if (
-		target === session.sourceItemIdx ||
-		target === session.sourceItemIdx + 1
+		slot.group === session.group &&
+		(target.itemIdx === session.sourceItemIdx ||
+			target.itemIdx === session.sourceItemIdx + 1)
 	) {
 		indicator.classList.remove("dli-visible");
 		return;
 	}
-	const rects = session.groupEls.map((els) => unionRect(els));
+	const rects = slot.itemRects;
 	let y: number;
 	let left: number;
 	let width: number;
-	if (target === 0) {
+	if (target.itemIdx === 0) {
 		const r = rects[0]!;
 		y = r.top;
 		left = r.left;
 		width = r.width;
-	} else if (target >= rects.length) {
+	} else if (target.itemIdx >= rects.length) {
 		const r = rects[rects.length - 1]!;
 		y = r.bottom;
 		left = r.left;
 		width = r.width;
 	} else {
-		const a = rects[target - 1]!;
-		const b = rects[target]!;
+		const a = rects[target.itemIdx - 1]!;
+		const b = rects[target.itemIdx]!;
 		y = (a.bottom + b.top) / 2;
 		left = Math.min(a.left, b.left);
 		width = Math.max(a.right, b.right) - left;
