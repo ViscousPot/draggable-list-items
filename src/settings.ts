@@ -54,7 +54,7 @@ export class DraggableListSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Enable cross-file drag")
 			.setDesc(
-				"Drag list items between different files across editor panes. (live preview only)",
+				"Drag list items between different files across editor panes. (Live preview only)",
 			)
 			.addToggle((t) =>
 				t
