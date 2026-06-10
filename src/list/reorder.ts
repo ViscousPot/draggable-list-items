@@ -141,10 +141,7 @@ export function moveItem(
 	return { text: newLines.join("\n"), newOrder: order };
 }
 
-function adjustBlockToGroup(
-	block: string[],
-	toGroup: Group,
-): void {
+function adjustBlockToGroup(block: string[], toGroup: Group): void {
 	if (block.length === 0) return;
 	const head = block[0]!;
 	const headInfo = parseLine(head);
@@ -201,7 +198,8 @@ function renumberOrderedInText(text: string): string {
 			if (info && info.kind === "ordered") {
 				const sep = info.orderedSep ?? ".";
 				const rest = line.replace(/^\s*\d+[.)]\s/, "");
-				lines[lineIdx] = `${" ".repeat(info.indent)}${i + 1}${sep} ${rest}`;
+				lines[lineIdx] =
+					`${" ".repeat(info.indent)}${i + 1}${sep} ${rest}`;
 			}
 		}
 	}

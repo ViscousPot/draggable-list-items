@@ -69,7 +69,9 @@ export function findGroup(lines: string[], anchorLine: number): Group | null {
 	if (!anchorInfo) return null;
 
 	const matches = (info: LineInfo | null): boolean =>
-		!!info && info.kind === anchorInfo.kind && info.indent === anchorInfo.indent;
+		!!info &&
+		info.kind === anchorInfo.kind &&
+		info.indent === anchorInfo.indent;
 
 	const starts: number[] = [anchorLine];
 

@@ -60,8 +60,8 @@ function addHandle(
 		if (ev.button !== 0) return;
 		ev.preventDefault();
 		ev.stopPropagation();
-		onHandlePointerDown(ev, li, app, getSettings, sourcePath).catch(
-			(err) => console.error(err),
+		onHandlePointerDown(ev, li, app, getSettings, sourcePath).catch((err) =>
+			console.error(err),
 		);
 	});
 	handle.addEventListener("mousedown", (ev) => ev.preventDefault());
@@ -110,12 +110,12 @@ async function onHandlePointerDown(
 	if (sourceItemIdx < 0) return;
 
 	const lineMap = new Map<number, HTMLElement>();
-	for (const liEl of activeDocument.querySelectorAll<HTMLElement>("li")) {
+	activeDocument.querySelectorAll<HTMLElement>("li").forEach((liEl) => {
 		const ln = liEl.dataset[LINE_ATTR];
 		if (ln !== undefined) {
 			lineMap.set(parseInt(ln, 10), liEl);
 		}
-	}
+	});
 
 	const allGroupSlots: GroupSlot[] = [];
 	for (const g of allGroups) {

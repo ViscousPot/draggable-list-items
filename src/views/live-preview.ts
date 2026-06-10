@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion */
-
 import {
 	EditorView,
 	ViewPlugin,
@@ -7,9 +5,13 @@ import {
 	PluginValue,
 } from "@codemirror/view";
 import { foldCode, unfoldCode, foldedRanges } from "@codemirror/language";
-import { App, Platform, TFile } from "obsidian";
+import { App, Editor, ItemView, MarkdownView, Platform, TFile } from "obsidian";
 import { findAllGroups, Group } from "../list/parse";
-import { moveItemCrossGroup, extractItemFromText, insertItemIntoText } from "../list/reorder";
+import {
+	moveItemCrossGroup,
+	extractItemFromText,
+	insertItemIntoText,
+} from "../list/reorder";
 import { beginDrag } from "../drag/controller";
 import { DragSession, GroupSlot, CrossFileResult } from "../drag/types";
 import { DraggableListSettings } from "../settings";
@@ -26,7 +28,14 @@ interface HandleEntry {
 	indent: number;
 }
 
-export function buildLivePreviewExtension(getSettings: () => DraggableListSettings, app: App) {
+interface CmEditor extends Editor {
+	cm: EditorView;
+}
+
+export function buildLivePreviewExtension(
+	getSettings: () => DraggableListSettings,
+	app: App,
+) {
 	return ViewPlugin.fromClass(
 		class implements PluginValue {
 			view: EditorView;
@@ -47,7 +56,9 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 				this.overlay.className = OVERLAY_CLASS;
 				view.scrollDOM.appendChild(this.overlay);
 				this.scrollListener = () => this.schedule();
-				view.scrollDOM.addEventListener("scroll", this.scrollListener, { passive: true });
+				view.scrollDOM.addEventListener("scroll", this.scrollListener, {
+					passive: true,
+				});
 				this.schedule();
 			}
 
@@ -58,7 +69,10 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 			}
 
 			destroy(): void {
-				this.view.scrollDOM.removeEventListener("scroll", this.scrollListener);
+				this.view.scrollDOM.removeEventListener(
+					"scroll",
+					this.scrollListener,
+				);
 				for (const { cleanup } of this.handles.values()) cleanup();
 				this.handles.clear();
 				this.overlay.remove();
@@ -100,7 +114,9 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 					if (linePos >= 0 && linePos <= this.view.state.doc.length) {
 						const line = this.view.state.doc.lineAt(linePos);
 						const indent = /^\s*/.exec(line.text)?.[0].length ?? 0;
-						const coords = this.view.coordsAtPos(line.from + indent);
+						const coords = this.view.coordsAtPos(
+							line.from + indent,
+						);
 						if (coords) contentLeft = coords.left;
 						entry.lineNum = line.number - 1;
 						entry.indent = indent;
@@ -142,8 +158,12 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 					this.onHandle(ev, lineEl);
 				};
 				handle.addEventListener("pointerdown", onDown);
-				handle.addEventListener("mousedown", (ev) => ev.preventDefault());
-				handle.addEventListener("dragstart", (ev) => ev.preventDefault());
+				handle.addEventListener("mousedown", (ev) =>
+					ev.preventDefault(),
+				);
+				handle.addEventListener("dragstart", (ev) =>
+					ev.preventDefault(),
+				);
 				handle.addEventListener("contextmenu", (ev) => {
 					ev.preventDefault();
 					ev.stopPropagation();
@@ -179,7 +199,11 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 				let currentIndent = target.indent;
 				if (currentIndent === 0) return;
 				const candidates = Array.from(this.handles.values())
-					.filter((e) => e.lineNum < target.lineNum && e.indent < target.indent)
+					.filter(
+						(e) =>
+							e.lineNum < target.lineNum &&
+							e.indent < target.indent,
+					)
 					.sort((a, b) => b.lineNum - a.lineNum);
 				for (const e of candidates) {
 					if (e.indent < currentIndent) {
@@ -254,7 +278,11 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 					const itemRects: DOMRect[] = [];
 					for (const item of g.items) {
 						const els: HTMLElement[] = [];
-						for (let ln = item.startLine; ln <= item.endLine; ln++) {
+						for (
+							let ln = item.startLine;
+							ln <= item.endLine;
+							ln++
+						) {
 							const el = lineMap.get(ln);
 							if (el) els.push(el);
 						}
@@ -270,7 +298,9 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 				const sourceSlot = allGroupSlots[groupIdx]!;
 				if (sourceSlot.groupEls.length === 0) return;
 
-				const sourceFile = getFileForCM(this.app, this.view) ?? this.app.workspace.getActiveFile();
+				const sourceFile =
+					getFileForCM(this.app, this.view) ??
+					this.app.workspace.getActiveFile();
 				if (!sourceFile) return;
 
 				const settings = this.getSettings();
@@ -284,10 +314,25 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 					enableCrossFileDrag: settings.enableCrossFileDrag,
 					app: this.app,
 					sourceFile,
-					queryCrossFile: (x, y) => queryCrossFileCM(this.app, sourceFile, this.view, x, y),
-					commit: ({ fromIdx, toIdx, fromGroup, toGroup, crossFile }) => {
+					queryCrossFile: (x, y) =>
+						queryCrossFileCM(this.app, sourceFile, this.view, x, y),
+					commit: ({
+						fromIdx,
+						toIdx,
+						fromGroup,
+						toGroup,
+						crossFile,
+					}) => {
 						if (crossFile) {
-							return commitCrossFileMoveCM(view, this.app, fromGroup, fromIdx, toGroup, toIdx, crossFile);
+							return commitCrossFileMoveCM(
+								view,
+								this.app,
+								fromGroup,
+								fromIdx,
+								toGroup,
+								toIdx,
+								crossFile,
+							);
 						}
 						commitMoveCM(view, fromGroup, fromIdx, toGroup, toIdx);
 						return;
@@ -328,7 +373,13 @@ function commitMoveCM(
 	);
 	if (!freshTo) return;
 
-	const result = moveItemCrossGroup(docText, freshFrom, freshFromIdx, freshTo, toIdx);
+	const result = moveItemCrossGroup(
+		docText,
+		freshFrom,
+		freshFromIdx,
+		freshTo,
+		toIdx,
+	);
 	if (!result) return;
 
 	const newLines = result.split("\n");
@@ -350,10 +401,10 @@ function commitMoveCM(
 
 function getFileForCM(app: App, cm: EditorView): TFile | null {
 	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
-		const editor = (leaf.view as any).editor;
+		const editor = (leaf.view as MarkdownView).editor;
 		if (!editor) continue;
-		if ((editor as any).cm === cm) {
-			return (leaf.view as any).file ?? null;
+		if ((editor as CmEditor).cm === cm) {
+			return (leaf.view as MarkdownView).file ?? null;
 		}
 	}
 	return null;
@@ -361,11 +412,11 @@ function getFileForCM(app: App, cm: EditorView): TFile | null {
 
 function getCMFromLeaf(app: App, file: TFile): EditorView | null {
 	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
-		const view = leaf.view;
-		if ((view as any).file !== file) continue;
-		const editor = (view as any).editor;
+		const view = leaf.view as ItemView;
+		if ((view as MarkdownView).file !== file) continue;
+		const editor = (view as MarkdownView).editor;
 		if (!editor) return null;
-		return (editor as any).cm as EditorView ?? null;
+		return (editor as CmEditor).cm ?? null;
 	}
 	return null;
 }
@@ -379,19 +430,22 @@ function queryCrossFileCM(
 ): CrossFileResult | null {
 	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
 		const leafView = leaf.view;
-		if ((leafView as any).file === sourceFile) continue;
-		const editor = (leafView as any).editor;
+		if ((leafView as MarkdownView).file === sourceFile) continue;
+		const editor = (leafView as MarkdownView).editor;
 		if (!editor) continue;
-		const cm = (editor as any).cm as EditorView | undefined;
+		const cm = (editor as CmEditor).cm as EditorView | undefined;
 		if (!cm) continue;
 		const rect = cm.contentDOM.getBoundingClientRect();
-		if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+		if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom)
+			continue;
 
 		const docText = cm.state.doc.toString();
 		const lines = docText.split("\n");
 		const allGroups = findAllGroups(lines);
 		const lineMap = new Map<number, HTMLElement>();
-		for (const node of Array.from(cm.contentDOM.querySelectorAll(".cm-line"))) {
+		for (const node of Array.from(
+			cm.contentDOM.querySelectorAll(".cm-line"),
+		)) {
 			const el = node as HTMLElement;
 			try {
 				const p = cm.posAtDOM(el);
@@ -420,7 +474,7 @@ function queryCrossFileCM(
 			allGroupSlots.push({ group: g, groupEls, itemRects });
 		}
 		if (allGroupSlots.length === 0) continue;
-		const targetFile = (leafView as any).file;
+		const targetFile = (leafView as MarkdownView).file;
 		if (!(targetFile instanceof TFile)) continue;
 		return { file: targetFile, allGroups: allGroupSlots };
 	}
@@ -459,7 +513,9 @@ async function commitCrossFileMoveCM(
 	const from = sourceView.state.doc.line(affectedStart + 1).from;
 	const to = sourceView.state.doc.line(affectedEnd + 1).to;
 	const sourceLines = extract.text.split("\n");
-	const newSlice = sourceLines.slice(affectedStart, affectedEnd + 1).join("\n");
+	const newSlice = sourceLines
+		.slice(affectedStart, affectedEnd + 1)
+		.join("\n");
 	sourceView.dispatch({
 		changes: { from, to, insert: newSlice },
 	});
@@ -476,7 +532,13 @@ async function commitCrossFileMoveCM(
 		if (!freshTo) return;
 
 		const sourceKind = fromGroup.kind;
-		const result = insertItemIntoText(targetText, extract.block, sourceKind, freshTo, toIdx);
+		const result = insertItemIntoText(
+			targetText,
+			extract.block,
+			sourceKind,
+			freshTo,
+			toIdx,
+		);
 		if (!result) return;
 
 		const newLines = result.split("\n");
@@ -484,7 +546,9 @@ async function commitCrossFileMoveCM(
 		const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
 		const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
 		const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
-		const insertSlice = newLines.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length).join("\n");
+		const insertSlice = newLines
+			.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
+			.join("\n");
 		targetCM.dispatch({
 			changes: { from: from2, to: to2, insert: insertSlice },
 		});
@@ -498,7 +562,15 @@ async function commitCrossFileMoveCM(
 			);
 			if (!freshTo) return text;
 			const sourceKind = fromGroup.kind;
-			return insertItemIntoText(text, extract.block, sourceKind, freshTo, toIdx) ?? text;
+			return (
+				insertItemIntoText(
+					text,
+					extract.block,
+					sourceKind,
+					freshTo,
+					toIdx,
+				) ?? text
+			);
 		});
 	}
 }

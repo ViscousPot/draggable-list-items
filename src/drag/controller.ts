@@ -39,7 +39,13 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		e.preventDefault();
 		positionGhost(ghost, e.clientX - offsetX, e.clientY - offsetY);
 
-		const sourceHit = hitTest(session.allGroups, session.group, session.enableCrossGroupDrag, e.clientX, e.clientY);
+		const sourceHit = hitTest(
+			session.allGroups,
+			session.group,
+			session.enableCrossGroupDrag,
+			e.clientX,
+			e.clientY,
+		);
 
 		if (sourceHit !== null) {
 			target = sourceHit;
@@ -50,7 +56,13 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 			if (cf) {
 				crossFile = cf;
 				activeGroups = cf.allGroups;
-				target = hitTest(activeGroups, session.group, true, e.clientX, e.clientY);
+				target = hitTest(
+					activeGroups,
+					session.group,
+					true,
+					e.clientX,
+					e.clientY,
+				);
 			} else {
 				crossFile = null;
 				activeGroups = session.allGroups;
@@ -62,7 +74,13 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 			target = null;
 		}
 
-		updateIndicator(indicator, activeGroups, session.group, session.sourceItemIdx, target);
+		updateIndicator(
+			indicator,
+			activeGroups,
+			session.group,
+			session.sourceItemIdx,
+			target,
+		);
 	};
 
 	const cleanup = () => {
@@ -82,7 +100,9 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		const finalCrossFile = crossFile;
 		cleanup();
 		if (final !== null) {
-			const groups = finalCrossFile ? finalCrossFile.allGroups : session.allGroups;
+			const groups = finalCrossFile
+				? finalCrossFile.allGroups
+				: session.allGroups;
 			const slot = groups[final.groupSlotIdx];
 			if (!slot) return;
 			if (
@@ -227,7 +247,8 @@ function collectDropRects(
 	sourceGroup: Group,
 	enableCrossGroupDrag: boolean,
 ): { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] {
-	const result: { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] = [];
+	const result: { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] =
+		[];
 	for (let g = 0; g < slots.length; g++) {
 		const slot = slots[g]!;
 		if (slot.group !== sourceGroup) {
@@ -250,7 +271,11 @@ function hitTest(
 	x: number,
 	y: number,
 ): HitTarget | null {
-	const allRects = collectDropRects(groups, sourceGroup, enableCrossGroupDrag);
+	const allRects = collectDropRects(
+		groups,
+		sourceGroup,
+		enableCrossGroupDrag,
+	);
 	if (allRects.length === 0) return null;
 
 	const first = allRects[0]!.rect;
@@ -263,29 +288,47 @@ function hitTest(
 	if (y > last.bottom + slack) return null;
 
 	if (y <= first.top) {
-		return { groupSlotIdx: allRects[0]!.groupSlotIdx, itemIdx: allRects[0]!.itemIdx };
+		return {
+			groupSlotIdx: allRects[0]!.groupSlotIdx,
+			itemIdx: allRects[0]!.itemIdx,
+		};
 	}
 	if (y >= last.bottom) {
 		const lastItem = allRects[allRects.length - 1]!;
-		return { groupSlotIdx: lastItem.groupSlotIdx, itemIdx: lastItem.itemIdx + 1 };
+		return {
+			groupSlotIdx: lastItem.groupSlotIdx,
+			itemIdx: lastItem.itemIdx + 1,
+		};
 	}
 
 	for (let i = 0; i < allRects.length; i++) {
 		const r = allRects[i]!.rect;
 		const mid = r.top + r.height / 2;
 		if (y < mid) {
-			return { groupSlotIdx: allRects[i]!.groupSlotIdx, itemIdx: allRects[i]!.itemIdx };
+			return {
+				groupSlotIdx: allRects[i]!.groupSlotIdx,
+				itemIdx: allRects[i]!.itemIdx,
+			};
 		}
 		if (y < r.bottom) {
 			const next = allRects[i + 1];
 			if (next) {
-				return { groupSlotIdx: next.groupSlotIdx, itemIdx: next.itemIdx };
+				return {
+					groupSlotIdx: next.groupSlotIdx,
+					itemIdx: next.itemIdx,
+				};
 			}
-			return { groupSlotIdx: allRects[i]!.groupSlotIdx, itemIdx: allRects[i]!.itemIdx + 1 };
+			return {
+				groupSlotIdx: allRects[i]!.groupSlotIdx,
+				itemIdx: allRects[i]!.itemIdx + 1,
+			};
 		}
 	}
 	const lastItem = allRects[allRects.length - 1]!;
-	return { groupSlotIdx: lastItem.groupSlotIdx, itemIdx: lastItem.itemIdx + 1 };
+	return {
+		groupSlotIdx: lastItem.groupSlotIdx,
+		itemIdx: lastItem.itemIdx + 1,
+	};
 }
 
 function updateIndicator(
