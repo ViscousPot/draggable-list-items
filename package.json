@@ -1,6 +1,6 @@
 {
 	"name": "draggable-list-items",
-	"version": "0.2.9",
+	"version": "0.2.10",
 	"description": "Drag list items to reorder them.",
 	"main": "main.js",
 	"type": "module",
