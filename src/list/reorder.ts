@@ -29,7 +29,7 @@ export function moveItemCrossGroup(
 	const sourceBlock = lines.splice(sourceStart, sourceLen);
 
 	if (fromGroup.kind !== toGroup.kind) {
-		adjustBlockToGroup(sourceBlock, fromGroup, toGroup);
+		adjustBlockToGroup(sourceBlock, toGroup);
 	}
 
 	const targetStart = toGroup.items[0]!.startLine;
@@ -44,6 +44,46 @@ export function moveItemCrossGroup(
 
 	let result = lines.join("\n");
 	if (fromGroup.kind === "ordered" || toGroup.kind === "ordered") {
+		result = renumberOrderedInText(result);
+	}
+	return result;
+}
+
+export function extractItemFromText(
+	text: string,
+	group: Group,
+	fromIdx: number,
+): { text: string; block: string[] } | null {
+	if (fromIdx < 0 || fromIdx >= group.items.length) return null;
+	const lines = text.split("\n");
+	const item = group.items[fromIdx]!;
+	const start = item.startLine;
+	const end = item.endLine;
+	const block = lines.splice(start, end - start + 1);
+	return { text: lines.join("\n"), block };
+}
+
+export function insertItemIntoText(
+	text: string,
+	block: string[],
+	sourceKind: import("./parse").ListKind,
+	toGroup: Group,
+	toIdx: number,
+): string | null {
+	if (toIdx < 0 || toIdx > toGroup.items.length) return null;
+	const lines = text.split("\n");
+	if (sourceKind !== toGroup.kind) {
+		adjustBlockToGroup(block, toGroup);
+	}
+	const targetStart = toGroup.items[0]!.startLine;
+	let insertAt = targetStart;
+	for (let i = 0; i < toIdx; i++) {
+		const item = toGroup.items[i]!;
+		insertAt += item.endLine - item.startLine + 1;
+	}
+	lines.splice(insertAt, 0, ...block);
+	let result = lines.join("\n");
+	if (toGroup.kind === "ordered") {
 		result = renumberOrderedInText(result);
 	}
 	return result;
@@ -103,7 +143,6 @@ export function moveItem(
 
 function adjustBlockToGroup(
 	block: string[],
-	_fromGroup: Group,
 	toGroup: Group,
 ): void {
 	if (block.length === 0) return;

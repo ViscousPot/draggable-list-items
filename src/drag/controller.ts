@@ -1,4 +1,4 @@
-import { DragSession, GroupSlot } from "./types";
+import { DragSession, GroupSlot, CrossFileResult } from "./types";
 import { Group } from "../list/parse";
 
 let cancelActive: (() => void) | null = null;
@@ -27,7 +27,10 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	const offsetX = ev.clientX - anchorLeft;
 	const offsetY = ev.clientY - srcRect.top;
 	const pointerId = ev.pointerId;
+
 	let target: HitTarget | null = null;
+	let activeGroups: GroupSlot[] = session.allGroups;
+	let crossFile: CrossFileResult | null = null;
 
 	positionGhost(ghost, ev.clientX - offsetX, ev.clientY - offsetY);
 
@@ -35,8 +38,31 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		if (e.pointerId !== pointerId) return;
 		e.preventDefault();
 		positionGhost(ghost, e.clientX - offsetX, e.clientY - offsetY);
-		target = hitTest(session, e.clientX, e.clientY);
-		updateIndicator(indicator, session, target);
+
+		const sourceHit = hitTest(session.allGroups, session.group, session.enableCrossGroupDrag, e.clientX, e.clientY);
+
+		if (sourceHit !== null) {
+			target = sourceHit;
+			activeGroups = session.allGroups;
+			crossFile = null;
+		} else if (session.enableCrossFileDrag && session.queryCrossFile) {
+			const cf = session.queryCrossFile(e.clientX, e.clientY);
+			if (cf) {
+				crossFile = cf;
+				activeGroups = cf.allGroups;
+				target = hitTest(activeGroups, session.group, true, e.clientX, e.clientY);
+			} else {
+				crossFile = null;
+				activeGroups = session.allGroups;
+				target = null;
+			}
+		} else {
+			crossFile = null;
+			activeGroups = session.allGroups;
+			target = null;
+		}
+
+		updateIndicator(indicator, activeGroups, session.group, session.sourceItemIdx, target);
 	};
 
 	const cleanup = () => {
@@ -53,11 +79,14 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	const onUp = (e: PointerEvent) => {
 		if (e.pointerId !== pointerId) return;
 		const final = target;
+		const finalCrossFile = crossFile;
 		cleanup();
 		if (final !== null) {
-			const slot = session.allGroups[final.groupSlotIdx];
+			const groups = finalCrossFile ? finalCrossFile.allGroups : session.allGroups;
+			const slot = groups[final.groupSlotIdx];
 			if (!slot) return;
 			if (
+				!finalCrossFile &&
 				slot.group === session.group &&
 				(final.itemIdx === session.sourceItemIdx ||
 					final.itemIdx === session.sourceItemIdx + 1)
@@ -70,6 +99,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 					toIdx: final.itemIdx,
 					fromGroup: session.group,
 					toGroup: slot.group,
+					crossFile: finalCrossFile ? finalCrossFile.file : undefined,
 				}),
 			).catch((err) => console.error(err));
 		}
@@ -214,15 +244,13 @@ function collectDropRects(
 }
 
 function hitTest(
-	session: DragSession,
+	groups: GroupSlot[],
+	sourceGroup: Group,
+	enableCrossGroupDrag: boolean,
 	x: number,
 	y: number,
 ): HitTarget | null {
-	const allRects = collectDropRects(
-		session.allGroups,
-		session.group,
-		session.enableCrossGroupDrag,
-	);
+	const allRects = collectDropRects(groups, sourceGroup, enableCrossGroupDrag);
 	if (allRects.length === 0) return null;
 
 	const first = allRects[0]!.rect;
@@ -262,22 +290,24 @@ function hitTest(
 
 function updateIndicator(
 	indicator: HTMLElement,
-	session: DragSession,
+	groups: GroupSlot[],
+	sourceGroup: Group,
+	sourceItemIdx: number,
 	target: HitTarget | null,
 ): void {
 	if (target === null) {
 		indicator.classList.remove("dli-visible");
 		return;
 	}
-	const slot = session.allGroups[target.groupSlotIdx];
+	const slot = groups[target.groupSlotIdx];
 	if (!slot) {
 		indicator.classList.remove("dli-visible");
 		return;
 	}
 	if (
-		slot.group === session.group &&
-		(target.itemIdx === session.sourceItemIdx ||
-			target.itemIdx === session.sourceItemIdx + 1)
+		slot.group === sourceGroup &&
+		(target.itemIdx === sourceItemIdx ||
+			target.itemIdx === sourceItemIdx + 1)
 	) {
 		indicator.classList.remove("dli-visible");
 		return;

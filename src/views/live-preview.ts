@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion */
+
 import {
 	EditorView,
 	ViewPlugin,
@@ -5,11 +7,11 @@ import {
 	PluginValue,
 } from "@codemirror/view";
 import { foldCode, unfoldCode, foldedRanges } from "@codemirror/language";
-import { Platform } from "obsidian";
+import { App, Platform, TFile } from "obsidian";
 import { findAllGroups, Group } from "../list/parse";
-import { moveItemCrossGroup } from "../list/reorder";
+import { moveItemCrossGroup, extractItemFromText, insertItemIntoText } from "../list/reorder";
 import { beginDrag } from "../drag/controller";
-import { DragSession, GroupSlot } from "../drag/types";
+import { DragSession, GroupSlot, CrossFileResult } from "../drag/types";
 import { DraggableListSettings } from "../settings";
 
 const HANDLE_CLASS = "dli-handle";
@@ -24,7 +26,7 @@ interface HandleEntry {
 	indent: number;
 }
 
-export function buildLivePreviewExtension(getSettings: () => DraggableListSettings) {
+export function buildLivePreviewExtension(getSettings: () => DraggableListSettings, app: App) {
 	return ViewPlugin.fromClass(
 		class implements PluginValue {
 			view: EditorView;
@@ -35,9 +37,11 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 			hoveredLineEl: HTMLElement | null = null;
 			hoverPending = false;
 			getSettings: () => DraggableListSettings;
+			app: App;
 
 			constructor(view: EditorView) {
 				this.view = view;
+				this.app = app;
 				this.getSettings = getSettings;
 				this.overlay = activeDocument.createElement("div");
 				this.overlay.className = OVERLAY_CLASS;
@@ -266,6 +270,9 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 				const sourceSlot = allGroupSlots[groupIdx]!;
 				if (sourceSlot.groupEls.length === 0) return;
 
+				const sourceFile = getFileForCM(this.app, this.view) ?? this.app.workspace.getActiveFile();
+				if (!sourceFile) return;
+
 				const settings = this.getSettings();
 				const session: DragSession = {
 					group,
@@ -274,8 +281,16 @@ export function buildLivePreviewExtension(getSettings: () => DraggableListSettin
 					groupEls: sourceSlot.groupEls,
 					allGroups: allGroupSlots,
 					enableCrossGroupDrag: settings.enableCrossGroupDrag,
-					commit: ({ fromIdx, toIdx, fromGroup, toGroup }) => {
+					enableCrossFileDrag: settings.enableCrossFileDrag,
+					app: this.app,
+					sourceFile,
+					queryCrossFile: (x, y) => queryCrossFileCM(this.app, sourceFile, this.view, x, y),
+					commit: ({ fromIdx, toIdx, fromGroup, toGroup, crossFile }) => {
+						if (crossFile) {
+							return commitCrossFileMoveCM(view, this.app, fromGroup, fromIdx, toGroup, toIdx, crossFile);
+						}
 						commitMoveCM(view, fromGroup, fromIdx, toGroup, toIdx);
+						return;
 					},
 				};
 
@@ -331,4 +346,159 @@ function commitMoveCM(
 	view.dispatch({
 		changes: { from, to, insert: newSlice },
 	});
+}
+
+function getFileForCM(app: App, cm: EditorView): TFile | null {
+	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+		const editor = (leaf.view as any).editor;
+		if (!editor) continue;
+		if ((editor as any).cm === cm) {
+			return (leaf.view as any).file ?? null;
+		}
+	}
+	return null;
+}
+
+function getCMFromLeaf(app: App, file: TFile): EditorView | null {
+	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+		const view = leaf.view;
+		if ((view as any).file !== file) continue;
+		const editor = (view as any).editor;
+		if (!editor) return null;
+		return (editor as any).cm as EditorView ?? null;
+	}
+	return null;
+}
+
+function queryCrossFileCM(
+	app: App,
+	sourceFile: TFile,
+	_sourceView: EditorView,
+	x: number,
+	y: number,
+): CrossFileResult | null {
+	for (const leaf of app.workspace.getLeavesOfType("markdown")) {
+		const leafView = leaf.view;
+		if ((leafView as any).file === sourceFile) continue;
+		const editor = (leafView as any).editor;
+		if (!editor) continue;
+		const cm = (editor as any).cm as EditorView | undefined;
+		if (!cm) continue;
+		const rect = cm.contentDOM.getBoundingClientRect();
+		if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+
+		const docText = cm.state.doc.toString();
+		const lines = docText.split("\n");
+		const allGroups = findAllGroups(lines);
+		const lineMap = new Map<number, HTMLElement>();
+		for (const node of Array.from(cm.contentDOM.querySelectorAll(".cm-line"))) {
+			const el = node as HTMLElement;
+			try {
+				const p = cm.posAtDOM(el);
+				const num = cm.state.doc.lineAt(p).number - 1;
+				lineMap.set(num, el);
+			} catch {
+				/* skip */
+			}
+		}
+		const allGroupSlots: GroupSlot[] = [];
+		for (const g of allGroups) {
+			const groupEls: HTMLElement[][] = [];
+			const itemRects: DOMRect[] = [];
+			for (const item of g.items) {
+				const els: HTMLElement[] = [];
+				for (let ln = item.startLine; ln <= item.endLine; ln++) {
+					const el = lineMap.get(ln);
+					if (el) els.push(el);
+				}
+				if (els.length === 0) continue;
+				groupEls.push(els);
+				const r = els[0]!.getBoundingClientRect();
+				itemRects.push(r);
+			}
+			if (groupEls.length === 0) continue;
+			allGroupSlots.push({ group: g, groupEls, itemRects });
+		}
+		if (allGroupSlots.length === 0) continue;
+		const targetFile = (leafView as any).file;
+		if (!(targetFile instanceof TFile)) continue;
+		return { file: targetFile, allGroups: allGroupSlots };
+	}
+	return null;
+}
+
+async function commitCrossFileMoveCM(
+	sourceView: EditorView,
+	app: App,
+	fromGroup: Group,
+	fromIdx: number,
+	toGroup: Group,
+	toIdx: number,
+	targetFile: TFile,
+): Promise<void> {
+	const anchorLine = fromGroup.items[fromIdx]?.startLine;
+	if (anchorLine === undefined) return;
+
+	const docText = sourceView.state.doc.toString();
+	const docLines = docText.split("\n");
+	const allGroups = findAllGroups(docLines);
+	const freshFrom = allGroups.find((g) =>
+		g.items.some((it) => it.startLine === anchorLine),
+	);
+	if (!freshFrom) return;
+	const freshFromIdx = freshFrom.items.findIndex(
+		(it) => it.startLine === anchorLine,
+	);
+	if (freshFromIdx < 0) return;
+
+	const extract = extractItemFromText(docText, freshFrom, freshFromIdx);
+	if (!extract) return;
+
+	const affectedStart = freshFrom.items[0]!.startLine;
+	const affectedEnd = freshFrom.items[freshFrom.items.length - 1]!.endLine;
+	const from = sourceView.state.doc.line(affectedStart + 1).from;
+	const to = sourceView.state.doc.line(affectedEnd + 1).to;
+	const sourceLines = extract.text.split("\n");
+	const newSlice = sourceLines.slice(affectedStart, affectedEnd + 1).join("\n");
+	sourceView.dispatch({
+		changes: { from, to, insert: newSlice },
+	});
+
+	const targetCM = getCMFromLeaf(app, targetFile);
+	if (targetCM) {
+		const targetText = targetCM.state.doc.toString();
+		const targetLines = targetText.split("\n");
+		const targetGroups = findAllGroups(targetLines);
+		const targetAnchor = toGroup.items[0]!.startLine;
+		const freshTo = targetGroups.find((g) =>
+			g.items.some((it) => it.startLine === targetAnchor),
+		);
+		if (!freshTo) return;
+
+		const sourceKind = fromGroup.kind;
+		const result = insertItemIntoText(targetText, extract.block, sourceKind, freshTo, toIdx);
+		if (!result) return;
+
+		const newLines = result.split("\n");
+		const affectedStart2 = freshTo.items[0]!.startLine;
+		const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
+		const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
+		const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
+		const insertSlice = newLines.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length).join("\n");
+		targetCM.dispatch({
+			changes: { from: from2, to: to2, insert: insertSlice },
+		});
+	} else {
+		await app.vault.process(targetFile, (text) => {
+			const targetLines = text.split("\n");
+			const targetGroups = findAllGroups(targetLines);
+			const targetAnchor = toGroup.items[0]!.startLine;
+			const freshTo = targetGroups.find((g) =>
+				g.items.some((it) => it.startLine === targetAnchor),
+			);
+			if (!freshTo) return text;
+			const sourceKind = fromGroup.kind;
+			return insertItemIntoText(text, extract.block, sourceKind, freshTo, toIdx) ?? text;
+		});
+	}
 }

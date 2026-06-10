@@ -4,11 +4,13 @@ import DraggableListItemsPlugin from "./main";
 export interface DraggableListSettings {
 	enabled: boolean;
 	enableCrossGroupDrag: boolean;
+	enableCrossFileDrag: boolean;
 }
 
 export const DEFAULT_SETTINGS: DraggableListSettings = {
 	enabled: true,
 	enableCrossGroupDrag: false,
+	enableCrossFileDrag: false,
 };
 
 export class DraggableListSettingTab extends PluginSettingTab {
@@ -39,6 +41,18 @@ export class DraggableListSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.enableCrossGroupDrag).onChange(async (v) => {
 					this.plugin.settings.enableCrossGroupDrag = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Enable cross-file drag")
+			.setDesc(
+				"Drag list items between different files across editor panes. (live preview only)",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.enableCrossFileDrag).onChange(async (v) => {
+					this.plugin.settings.enableCrossFileDrag = v;
 					await this.plugin.saveSettings();
 				}),
 			);
