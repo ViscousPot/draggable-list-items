@@ -1,13 +1,18 @@
 import { App, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { findGroup, findAllGroups, parseLine } from "../list/parse";
 import { moveItem, moveItemCrossGroup } from "../list/reorder";
-import { beginDrag } from "../drag/controller";
+import {
+	beginDrag,
+	tryArmGesture,
+	releaseGestureArm,
+} from "../drag/controller";
 import { DragSession, GroupSlot } from "../drag/types";
 import { DraggableListSettings } from "../settings";
 
 const HANDLE_CLASS = "dli-handle";
-const SHOW_CLASS = "dli-show";
+const HAS_CHILDREN_CLASS = "dli-has-children";
 const LINE_ATTR = "dliLine";
+const DRAG_THRESHOLD_PX = 5;
 
 export function attachReadingViewHandles(
 	app: App,
@@ -51,31 +56,122 @@ function addHandle(
 	handle.textContent = "⋮⋮";
 	handle.draggable = false;
 
-	li.addEventListener("mouseenter", () => handle.classList.add(SHOW_CLASS));
-	li.addEventListener("mouseleave", () =>
-		handle.classList.remove(SHOW_CLASS),
-	);
+	if (
+		li.querySelector(
+			":scope > ul, :scope > ol, :scope > .list-collapse-indicator, :scope > .collapse-icon",
+		)
+	) {
+		handle.classList.add(HAS_CHILDREN_CLASS);
+	}
 
 	handle.addEventListener("pointerdown", (ev) => {
 		if (ev.button !== 0) return;
 		ev.preventDefault();
 		ev.stopPropagation();
-		onHandlePointerDown(ev, li, app, getSettings, sourcePath).catch((err) =>
-			console.error(err),
-		);
+		armGesture(ev, li, app, getSettings, sourcePath);
 	});
 	handle.addEventListener("mousedown", (ev) => ev.preventDefault());
 	handle.addEventListener("dragstart", (ev) => ev.preventDefault());
 	handle.addEventListener("contextmenu", (ev) => {
 		ev.preventDefault();
 		ev.stopPropagation();
-		const chevron = li.querySelector(
-			":scope > .list-collapse-indicator, :scope > .collapse-icon",
-		);
-		if (chevron) (chevron as HTMLElement).click();
 	});
 
 	li.prepend(handle);
+}
+
+function armGesture(
+	downEv: PointerEvent,
+	li: HTMLLIElement,
+	app: App,
+	getSettings: () => DraggableListSettings,
+	sourcePath: string,
+): void {
+	if (!tryArmGesture()) return;
+	const startX = downEv.clientX;
+	const startY = downEv.clientY;
+	const pointerId = downEv.pointerId;
+
+	const disarm = () => {
+		activeDocument.removeEventListener("pointermove", onMove);
+		activeDocument.removeEventListener("pointerup", onUp);
+		activeDocument.removeEventListener("pointercancel", onCancel);
+		releaseGestureArm();
+	};
+	const onMove = (e: PointerEvent) => {
+		if (e.pointerId !== pointerId) return;
+		if ((e.buttons & 1) === 0) {
+			disarm();
+			return;
+		}
+		const dx = e.clientX - startX;
+		const dy = e.clientY - startY;
+		if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+		activeDocument.removeEventListener("pointermove", onMove);
+		activeDocument.removeEventListener("pointerup", onUp);
+		activeDocument.removeEventListener("pointercancel", onCancel);
+		if (!li.isConnected) {
+			releaseGestureArm();
+			return;
+		}
+		// the session build awaits a vault read; keep the gesture slot
+		// claimed and watch for a release OR cancel inside that window so
+		// we never start a drag for a pointer that is already gone
+		let released = false;
+		const onReleaseWhileLoading = (e2: PointerEvent) => {
+			if (e2.pointerId !== pointerId) return;
+			released = true;
+			stopWatchingRelease();
+		};
+		const stopWatchingRelease = () => {
+			activeDocument.removeEventListener(
+				"pointerup",
+				onReleaseWhileLoading,
+			);
+			activeDocument.removeEventListener(
+				"pointercancel",
+				onReleaseWhileLoading,
+			);
+		};
+		activeDocument.addEventListener("pointerup", onReleaseWhileLoading);
+		activeDocument.addEventListener(
+			"pointercancel",
+			onReleaseWhileLoading,
+		);
+		onHandlePointerDown(
+			downEv,
+			li,
+			app,
+			getSettings,
+			sourcePath,
+			() => released,
+		)
+			.catch((err) => console.error(err))
+			.finally(() => {
+				stopWatchingRelease();
+				releaseGestureArm();
+			});
+	};
+	const onUp = (e: PointerEvent) => {
+		if (e.pointerId !== pointerId) return;
+		disarm();
+		if (!li.isConnected) return;
+		toggleCollapse(li);
+	};
+	const onCancel = (e: PointerEvent) => {
+		if (e.pointerId !== pointerId) return;
+		disarm();
+	};
+	activeDocument.addEventListener("pointermove", onMove);
+	activeDocument.addEventListener("pointerup", onUp);
+	activeDocument.addEventListener("pointercancel", onCancel);
+}
+
+function toggleCollapse(li: HTMLLIElement): void {
+	const chevron = li.querySelector<HTMLElement>(
+		":scope > .list-collapse-indicator, :scope > .collapse-icon",
+	);
+	if (chevron) chevron.click();
 }
 
 async function onHandlePointerDown(
@@ -84,6 +180,7 @@ async function onHandlePointerDown(
 	app: App,
 	getSettings: () => DraggableListSettings,
 	sourcePath: string,
+	isReleased?: () => boolean,
 ): Promise<void> {
 	const enableCrossGroupDrag = getSettings().enableCrossGroupDrag;
 	const lineStr = li.dataset[LINE_ATTR];
@@ -121,25 +218,32 @@ async function onHandlePointerDown(
 	for (const g of allGroups) {
 		const groupEls: HTMLElement[][] = [];
 		const itemRects: DOMRect[] = [];
-		for (const item of g.items) {
+		const itemIdxs: number[] = [];
+		const itemExtents: number[] = [];
+		for (let ii = 0; ii < g.items.length; ii++) {
+			const item = g.items[ii]!;
 			const liEl = lineMap.get(item.startLine);
-			if (!liEl) {
-				groupEls.length = 0;
-				break;
-			}
+			if (!liEl) continue;
+			const r = liEl.getBoundingClientRect();
+			if (r.width === 0 && r.height === 0) continue;
 			groupEls.push([liEl]);
-			itemRects.push(liEl.getBoundingClientRect());
+			itemRects.push(r);
+			itemIdxs.push(ii);
+			itemExtents.push(r.bottom);
 		}
 		if (groupEls.length === 0) continue;
-		allGroupSlots.push({ group: g, groupEls, itemRects });
+		allGroupSlots.push({ group: g, groupEls, itemRects, itemIdxs, itemExtents });
 	}
 
-	const sourceSlot = allGroupSlots[sourceGroupIdx];
-	if (!sourceSlot || sourceSlot.groupEls.length === 0) return;
+	const sourceSlot = allGroupSlots.find((s) => s.group === group);
+	if (!sourceSlot) return;
+	const sourceVisIdx = sourceSlot.itemIdxs.indexOf(sourceItemIdx);
+	if (sourceVisIdx < 0) return;
 
 	const session: DragSession = {
 		group,
 		sourceItemIdx,
+		sourceVisIdx,
 		sourceEl: li,
 		groupEls: sourceSlot.groupEls,
 		allGroups: allGroupSlots,
@@ -152,6 +256,7 @@ async function onHandlePointerDown(
 			commitMove(app, file, fromGroup, fromIdx, toGroup, toIdx),
 	};
 
+	if (isReleased?.()) return;
 	beginDrag(session, ev);
 }
 
@@ -203,6 +308,6 @@ async function commitMove(
 			freshTo,
 			toIdx,
 		);
-		return result ?? text;
+		return result ? result.text : text;
 	});
 }

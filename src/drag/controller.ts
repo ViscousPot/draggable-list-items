@@ -1,13 +1,28 @@
-import { DragSession, GroupSlot, CrossFileResult } from "./types";
-import { Group } from "../list/parse";
+import type { DragSession, GroupSlot, CrossFileResult } from "./types";
+import type { Group } from "../list/parse";
 
 let cancelActive: (() => void) | null = null;
+let gestureArmed = false;
+
+/**
+ * Claims the single gesture slot (armed press or active drag). Callers must
+ * pair a successful claim with releaseGestureArm() on every disarm path.
+ */
+export function tryArmGesture(): boolean {
+	if (gestureArmed || cancelActive !== null) return false;
+	gestureArmed = true;
+	return true;
+}
+
+export function releaseGestureArm(): void {
+	gestureArmed = false;
+}
 
 export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	cancelDrag();
 	ev.preventDefault();
 
-	const srcEls = session.groupEls[session.sourceItemIdx];
+	const srcEls = session.groupEls[session.sourceVisIdx];
 	if (!srcEls || srcEls.length === 0) return;
 	const srcRect = unionRect(srcEls);
 	const sourceParent = session.sourceEl.parentElement;
@@ -36,6 +51,10 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 
 	const onMove = (e: PointerEvent) => {
 		if (e.pointerId !== pointerId) return;
+		if ((e.buttons & 1) === 0) {
+			cancelDrag();
+			return;
+		}
 		e.preventDefault();
 		positionGhost(ghost, e.clientX - offsetX, e.clientY - offsetY);
 
@@ -242,13 +261,21 @@ interface HitTarget {
 	itemIdx: number;
 }
 
+interface DropEntry {
+	groupSlotIdx: number;
+	/** real index into the slot's group.items */
+	itemIdx: number;
+	rect: DOMRect;
+	/** bottom of the item's last visible line (below its subtree) */
+	extentBottom: number;
+}
+
 function collectDropRects(
 	slots: GroupSlot[],
 	sourceGroup: Group,
 	enableCrossGroupDrag: boolean,
-): { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] {
-	const result: { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] =
-		[];
+): DropEntry[] {
+	const result: DropEntry[] = [];
 	for (let g = 0; g < slots.length; g++) {
 		const slot = slots[g]!;
 		if (slot.group !== sourceGroup) {
@@ -257,14 +284,25 @@ function collectDropRects(
 		}
 		for (let i = 0; i < slot.groupEls.length; i++) {
 			const rect = slot.itemRects[i]!;
-			result.push({ groupSlotIdx: g, itemIdx: i, rect });
+			// hidden elements measure as all-zero boxes; letting one in
+			// would hand it a huge hit region via the gap split
+			if (rect.width === 0 && rect.height === 0) continue;
+			result.push({
+				groupSlotIdx: g,
+				itemIdx: slot.itemIdxs[i]!,
+				rect,
+				extentBottom: Math.max(
+					rect.bottom,
+					slot.itemExtents[i] ?? rect.bottom,
+				),
+			});
 		}
 	}
 	result.sort((a, b) => a.rect.top - b.rect.top);
 	return result;
 }
 
-function hitTest(
+export function hitTest(
 	groups: GroupSlot[],
 	sourceGroup: Group,
 	enableCrossGroupDrag: boolean,
@@ -278,57 +316,53 @@ function hitTest(
 	);
 	if (allRects.length === 0) return null;
 
-	const first = allRects[0]!.rect;
-	const last = allRects[allRects.length - 1]!.rect;
+	const first = allRects[0]!;
+	const last = allRects[allRects.length - 1]!;
 	const slack = 24;
 	const minLeft = Math.min(...allRects.map((r) => r.rect.left)) - slack;
 	const maxRight = Math.max(...allRects.map((r) => r.rect.right)) + slack;
 	if (x < minLeft || x > maxRight) return null;
-	if (y < first.top - slack) return null;
-	if (y > last.bottom + slack) return null;
+	if (y < first.rect.top - slack) return null;
+	if (y > last.extentBottom + slack) return null;
 
-	if (y <= first.top) {
-		return {
-			groupSlotIdx: allRects[0]!.groupSlotIdx,
-			itemIdx: allRects[0]!.itemIdx,
-		};
+	if (y <= first.rect.top) {
+		return { groupSlotIdx: first.groupSlotIdx, itemIdx: first.itemIdx };
 	}
-	if (y >= last.bottom) {
-		const lastItem = allRects[allRects.length - 1]!;
-		return {
-			groupSlotIdx: lastItem.groupSlotIdx,
-			itemIdx: lastItem.itemIdx + 1,
-		};
+	if (y >= last.extentBottom) {
+		return { groupSlotIdx: last.groupSlotIdx, itemIdx: last.itemIdx + 1 };
 	}
 
 	for (let i = 0; i < allRects.length; i++) {
-		const r = allRects[i]!.rect;
+		const cur = allRects[i]!;
+		const r = cur.rect;
 		const mid = r.top + r.height / 2;
 		if (y < mid) {
-			return {
-				groupSlotIdx: allRects[i]!.groupSlotIdx,
-				itemIdx: allRects[i]!.itemIdx,
-			};
+			return { groupSlotIdx: cur.groupSlotIdx, itemIdx: cur.itemIdx };
 		}
-		if (y < r.bottom) {
-			const next = allRects[i + 1];
-			if (next) {
+		const next = allRects[i + 1];
+		if (!next) break;
+		if (y < next.rect.top) {
+			// pointer is in this item's lower half, over its subtree, or in
+			// the span separating it from the next entry (headers/paragraphs
+			// between groups): the upper half of that span drops AFTER this
+			// item (above the header), the lower half BEFORE the next one
+			// (below the header); inside one group both resolve identically
+			const boundary = (cur.extentBottom + next.rect.top) / 2;
+			if (y < boundary) {
 				return {
-					groupSlotIdx: next.groupSlotIdx,
-					itemIdx: next.itemIdx,
+					groupSlotIdx: cur.groupSlotIdx,
+					itemIdx: cur.itemIdx + 1,
 				};
 			}
-			return {
-				groupSlotIdx: allRects[i]!.groupSlotIdx,
-				itemIdx: allRects[i]!.itemIdx + 1,
-			};
+			return { groupSlotIdx: next.groupSlotIdx, itemIdx: next.itemIdx };
 		}
 	}
-	const lastItem = allRects[allRects.length - 1]!;
-	return {
-		groupSlotIdx: lastItem.groupSlotIdx,
-		itemIdx: lastItem.itemIdx + 1,
-	};
+	return { groupSlotIdx: last.groupSlotIdx, itemIdx: last.itemIdx + 1 };
+}
+
+function itemExtentBottom(slot: GroupSlot, visIdx: number): number {
+	const rectBottom = slot.itemRects[visIdx]!.bottom;
+	return Math.max(rectBottom, slot.itemExtents[visIdx] ?? rectBottom);
 }
 
 function updateIndicator(
@@ -355,24 +389,40 @@ function updateIndicator(
 		indicator.classList.remove("dli-visible");
 		return;
 	}
-	const rects = slot.itemRects;
+
+	// the boundary sits before REAL item target.itemIdx; locate its visible
+	// neighbors (viewport rendering can omit items from the slot arrays)
+	const vis = slot.itemIdxs;
+	let nextVis = -1;
+	for (let i = 0; i < vis.length; i++) {
+		if (vis[i]! >= target.itemIdx) {
+			nextVis = i;
+			break;
+		}
+	}
+	const prevVis = nextVis === -1 ? vis.length - 1 : nextVis - 1;
+
 	let y: number;
 	let left: number;
 	let width: number;
-	if (target.itemIdx === 0) {
-		const r = rects[0]!;
+	if (prevVis < 0 && nextVis === -1) {
+		indicator.classList.remove("dli-visible");
+		return;
+	}
+	if (prevVis < 0) {
+		const r = slot.itemRects[nextVis]!;
 		y = r.top;
 		left = r.left;
 		width = r.width;
-	} else if (target.itemIdx >= rects.length) {
-		const r = rects[rects.length - 1]!;
-		y = r.bottom;
+	} else if (nextVis === -1) {
+		const r = slot.itemRects[prevVis]!;
+		y = itemExtentBottom(slot, prevVis);
 		left = r.left;
 		width = r.width;
 	} else {
-		const a = rects[target.itemIdx - 1]!;
-		const b = rects[target.itemIdx]!;
-		y = (a.bottom + b.top) / 2;
+		const a = slot.itemRects[prevVis]!;
+		const b = slot.itemRects[nextVis]!;
+		y = (itemExtentBottom(slot, prevVis) + b.top) / 2;
 		left = Math.min(a.left, b.left);
 		width = Math.max(a.right, b.right) - left;
 	}

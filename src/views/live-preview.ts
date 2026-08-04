@@ -4,7 +4,17 @@ import {
 	ViewUpdate,
 	PluginValue,
 } from "@codemirror/view";
-import { foldCode, unfoldCode, foldedRanges } from "@codemirror/language";
+import {
+	foldCode,
+	unfoldCode,
+	foldedRanges,
+	foldable,
+	foldEffect,
+	unfoldEffect,
+	foldState,
+	codeFolding,
+} from "@codemirror/language";
+import { StateEffect } from "@codemirror/state";
 import { App, Editor, ItemView, MarkdownView, Platform, TFile } from "obsidian";
 import { findAllGroups, Group } from "../list/parse";
 import {
@@ -12,18 +22,23 @@ import {
 	extractItemFromText,
 	insertItemIntoText,
 } from "../list/reorder";
-import { beginDrag } from "../drag/controller";
+import { remapLineAfterMove } from "../list/fold-remap";
+import {
+	beginDrag,
+	tryArmGesture,
+	releaseGestureArm,
+} from "../drag/controller";
 import { DragSession, GroupSlot, CrossFileResult } from "../drag/types";
 import { DraggableListSettings } from "../settings";
 
 const HANDLE_CLASS = "dli-handle";
 const HANDLE_CM_CLASS = "dli-handle-cm";
-const SHOW_CLASS = "dli-show";
+const HAS_CHILDREN_CLASS = "dli-has-children";
 const OVERLAY_CLASS = "dli-cm-overlay";
+const DRAG_THRESHOLD_PX = 5;
 
 interface HandleEntry {
 	handle: HTMLElement;
-	cleanup: () => void;
 	lineNum: number;
 	indent: number;
 }
@@ -43,8 +58,6 @@ export function buildLivePreviewExtension(
 			handles = new Map<HTMLElement, HandleEntry>();
 			scheduled = false;
 			scrollListener: () => void;
-			hoveredLineEl: HTMLElement | null = null;
-			hoverPending = false;
 			getSettings: () => DraggableListSettings;
 			app: App;
 
@@ -73,7 +86,6 @@ export function buildLivePreviewExtension(
 					"scroll",
 					this.scrollListener,
 				);
-				for (const { cleanup } of this.handles.values()) cleanup();
 				this.handles.clear();
 				this.overlay.remove();
 			}
@@ -106,10 +118,13 @@ export function buildLivePreviewExtension(
 						this.handles.set(lineEl, entry);
 					}
 					const r = lineEl.getBoundingClientRect();
-					const top = r.top - overlayRect.top;
 					const offset = Platform.isMobile ? 18 : 14;
 
 					let contentLeft: number | null = null;
+					// align to the first visual row (checkbox row), not the
+					// whole wrapped block
+					let rowTop = r.top;
+					let rowHeight = r.height;
 					const linePos = this.view.posAtDOM(lineEl);
 					if (linePos >= 0 && linePos <= this.view.state.doc.length) {
 						const line = this.view.state.doc.lineAt(linePos);
@@ -117,21 +132,31 @@ export function buildLivePreviewExtension(
 						const coords = this.view.coordsAtPos(
 							line.from + indent,
 						);
-						if (coords) contentLeft = coords.left;
+						if (coords) {
+							contentLeft = coords.left;
+							if (coords.bottom > coords.top) {
+								rowTop = coords.top;
+								rowHeight = coords.bottom - coords.top;
+							}
+						}
 						entry.lineNum = line.number - 1;
 						entry.indent = indent;
+						entry.handle.classList.toggle(
+							HAS_CHILDREN_CLASS,
+							foldable(this.view.state, line.from, line.to) !==
+								null,
+						);
 					}
 
 					const anchorLeft = contentLeft ?? r.left;
 					const left = anchorLeft - overlayRect.left - offset;
-					entry.handle.style.top = `${top}px`;
+					entry.handle.style.top = `${rowTop - overlayRect.top}px`;
 					entry.handle.style.left = `${left}px`;
-					entry.handle.style.height = `${r.height}px`;
+					entry.handle.style.height = `${rowHeight}px`;
 				}
 
 				for (const [el, entry] of this.handles) {
 					if (!seen.has(el)) {
-						entry.cleanup();
 						entry.handle.remove();
 						this.handles.delete(el);
 					}
@@ -144,18 +169,11 @@ export function buildLivePreviewExtension(
 				handle.textContent = "⋮⋮";
 				handle.draggable = false;
 
-				const onEnter = () => this.setHover(lineEl);
-				const onLeave = () => this.setHover(null);
-				lineEl.addEventListener("mouseenter", onEnter);
-				lineEl.addEventListener("mouseleave", onLeave);
-				handle.addEventListener("mouseenter", onEnter);
-				handle.addEventListener("mouseleave", onLeave);
-
 				const onDown = (ev: PointerEvent) => {
 					if (ev.button !== 0) return;
 					ev.preventDefault();
 					ev.stopPropagation();
-					this.onHandle(ev, lineEl);
+					this.armGesture(ev, lineEl);
 				};
 				handle.addEventListener("pointerdown", onDown);
 				handle.addEventListener("mousedown", (ev) =>
@@ -167,51 +185,65 @@ export function buildLivePreviewExtension(
 				handle.addEventListener("contextmenu", (ev) => {
 					ev.preventDefault();
 					ev.stopPropagation();
-					this.toggleFold(lineEl);
 				});
 
-				const cleanup = () => {
-					lineEl.removeEventListener("mouseenter", onEnter);
-					lineEl.removeEventListener("mouseleave", onLeave);
+				return { handle, lineNum: -1, indent: 0 };
+			}
+
+			armGesture(downEv: PointerEvent, lineEl: HTMLElement): void {
+				if (!tryArmGesture()) return;
+				const startX = downEv.clientX;
+				const startY = downEv.clientY;
+				const pointerId = downEv.pointerId;
+
+				const disarm = () => {
+					activeDocument.removeEventListener("pointermove", onMove);
+					activeDocument.removeEventListener("pointerup", onUp);
+					activeDocument.removeEventListener(
+						"pointercancel",
+						onCancel,
+					);
+					releaseGestureArm();
 				};
-				return { handle, cleanup, lineNum: -1, indent: 0 };
-			}
-
-			setHover(lineEl: HTMLElement | null): void {
-				this.hoveredLineEl = lineEl;
-				if (this.hoverPending) return;
-				this.hoverPending = true;
-				window.requestAnimationFrame(() => {
-					this.hoverPending = false;
-					this.reconcileHover();
-				});
-			}
-
-			reconcileHover(): void {
-				for (const e of this.handles.values()) {
-					e.handle.classList.remove(SHOW_CLASS);
-				}
-				const lineEl = this.hoveredLineEl;
-				if (!lineEl) return;
-				const target = this.handles.get(lineEl);
-				if (!target) return;
-				target.handle.classList.add(SHOW_CLASS);
-				let currentIndent = target.indent;
-				if (currentIndent === 0) return;
-				const candidates = Array.from(this.handles.values())
-					.filter(
-						(e) =>
-							e.lineNum < target.lineNum &&
-							e.indent < target.indent,
-					)
-					.sort((a, b) => b.lineNum - a.lineNum);
-				for (const e of candidates) {
-					if (e.indent < currentIndent) {
-						e.handle.classList.add(SHOW_CLASS);
-						currentIndent = e.indent;
-						if (currentIndent === 0) return;
+				const onMove = (e: PointerEvent) => {
+					if (e.pointerId !== pointerId) return;
+					if ((e.buttons & 1) === 0) {
+						disarm();
+						return;
 					}
+					const dx = e.clientX - startX;
+					const dy = e.clientY - startY;
+					if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+					disarm();
+					if (!lineEl.isConnected) return;
+					this.onHandle(downEv, lineEl);
+				};
+				const onUp = (e: PointerEvent) => {
+					if (e.pointerId !== pointerId) return;
+					disarm();
+					if (!lineEl.isConnected) return;
+					if (this.lineIsFoldable(lineEl)) this.toggleFold(lineEl);
+				};
+				const onCancel = (e: PointerEvent) => {
+					if (e.pointerId !== pointerId) return;
+					disarm();
+				};
+				activeDocument.addEventListener("pointermove", onMove);
+				activeDocument.addEventListener("pointerup", onUp);
+				activeDocument.addEventListener("pointercancel", onCancel);
+			}
+
+			lineIsFoldable(lineEl: HTMLElement): boolean {
+				const view = this.view;
+				let pos: number;
+				try {
+					pos = view.posAtDOM(lineEl);
+				} catch {
+					return false;
 				}
+				if (pos < 0 || pos > view.state.doc.length) return false;
+				const line = view.state.doc.lineAt(pos);
+				return foldable(view.state, line.from, line.to) !== null;
 			}
 
 			toggleFold(lineEl: HTMLElement): void {
@@ -224,7 +256,12 @@ export function buildLivePreviewExtension(
 					return;
 				}
 
-				const pos = view.posAtDOM(lineEl);
+				let pos: number;
+				try {
+					pos = view.posAtDOM(lineEl);
+				} catch {
+					return;
+				}
 				const line = view.state.doc.lineAt(pos);
 				const selection = { anchor: line.from };
 				let folded: { from: number; to: number } | null = null;
@@ -276,7 +313,10 @@ export function buildLivePreviewExtension(
 				for (const g of allGroups) {
 					const groupEls: HTMLElement[][] = [];
 					const itemRects: DOMRect[] = [];
-					for (const item of g.items) {
+					const itemIdxs: number[] = [];
+					const itemExtents: number[] = [];
+					for (let ii = 0; ii < g.items.length; ii++) {
+						const item = g.items[ii]!;
 						const els: HTMLElement[] = [];
 						for (
 							let ln = item.startLine;
@@ -287,16 +327,36 @@ export function buildLivePreviewExtension(
 							if (el) els.push(el);
 						}
 						if (els.length === 0) continue;
-						groupEls.push(els);
 						const r = els[0]!.getBoundingClientRect();
+						if (r.width === 0 && r.height === 0) continue;
+						let extent = r.bottom;
+						for (let e = els.length - 1; e >= 0; e--) {
+							const er = els[e]!.getBoundingClientRect();
+							if (er.width === 0 && er.height === 0) continue;
+							if (er.bottom > extent) extent = er.bottom;
+							break;
+						}
+						groupEls.push(els);
 						itemRects.push(r);
+						itemIdxs.push(ii);
+						itemExtents.push(extent);
 					}
 					if (groupEls.length === 0) continue;
-					allGroupSlots.push({ group: g, groupEls, itemRects });
+					allGroupSlots.push({
+						group: g,
+						groupEls,
+						itemRects,
+						itemIdxs,
+						itemExtents,
+					});
 				}
 
-				const sourceSlot = allGroupSlots[groupIdx]!;
-				if (sourceSlot.groupEls.length === 0) return;
+				const sourceSlot = allGroupSlots.find(
+					(s) => s.group === group,
+				);
+				if (!sourceSlot) return;
+				const sourceVisIdx = sourceSlot.itemIdxs.indexOf(sourceItemIdx);
+				if (sourceVisIdx < 0) return;
 
 				const sourceFile =
 					getFileForCM(this.app, this.view) ??
@@ -307,6 +367,7 @@ export function buildLivePreviewExtension(
 				const session: DragSession = {
 					group,
 					sourceItemIdx,
+					sourceVisIdx,
 					sourceEl: lineEl,
 					groupEls: sourceSlot.groupEls,
 					allGroups: allGroupSlots,
@@ -382,7 +443,9 @@ function commitMoveCM(
 	);
 	if (!result) return;
 
-	const newLines = result.split("\n");
+	const foldAnchors = captureFoldAnchors(view);
+
+	const newLines = result.text.split("\n");
 	const affectedStart = Math.min(
 		freshFrom.items[0]!.startLine,
 		freshTo.items[0]!.startLine,
@@ -397,6 +460,61 @@ function commitMoveCM(
 	view.dispatch({
 		changes: { from, to, insert: newSlice },
 	});
+
+	restoreFoldAnchors(
+		view,
+		foldAnchors.map((anchor) =>
+			remapLineAfterMove(
+				anchor,
+				result.srcStart,
+				result.srcLen,
+				result.destStart,
+			),
+		),
+	);
+}
+
+function captureFoldAnchors(view: EditorView): number[] {
+	const anchors: number[] = [];
+	const iter = foldedRanges(view.state).iter();
+	while (iter.value) {
+		anchors.push(view.state.doc.lineAt(iter.from).number - 1);
+		iter.next();
+	}
+	return anchors;
+}
+
+function restoreFoldAnchors(view: EditorView, anchors: number[]): void {
+	const state = view.state;
+	const alreadyFolded = foldedRanges(state);
+	const effects: StateEffect<unknown>[] = [];
+	const seen = new Set<string>();
+	for (const anchor of anchors) {
+		if (anchor < 0 || anchor >= state.doc.lines) continue;
+		const line = state.doc.line(anchor + 1);
+		const range = foldable(state, line.from, line.to);
+		if (!range) continue;
+		const key = `${range.from}:${range.to}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		let exists = false;
+		alreadyFolded.between(line.from, line.to, (from, to) => {
+			if (from < line.from || from > line.to) return;
+			if (from === range.from && to === range.to) {
+				exists = true;
+			} else {
+				// a fold clipped by the slice replacement survives with the
+				// wrong extent; clear it before re-folding the true range
+				effects.push(unfoldEffect.of({ from, to }));
+			}
+		});
+		if (!exists) effects.push(foldEffect.of(range));
+	}
+	if (effects.length === 0) return;
+	if (!state.field(foldState, false)) {
+		effects.unshift(StateEffect.appendConfig.of(codeFolding()));
+	}
+	view.dispatch({ effects });
 }
 
 function getFileForCM(app: App, cm: EditorView): TFile | null {
@@ -459,19 +577,38 @@ function queryCrossFileCM(
 		for (const g of allGroups) {
 			const groupEls: HTMLElement[][] = [];
 			const itemRects: DOMRect[] = [];
-			for (const item of g.items) {
+			const itemIdxs: number[] = [];
+			const itemExtents: number[] = [];
+			for (let ii = 0; ii < g.items.length; ii++) {
+				const item = g.items[ii]!;
 				const els: HTMLElement[] = [];
 				for (let ln = item.startLine; ln <= item.endLine; ln++) {
 					const el = lineMap.get(ln);
 					if (el) els.push(el);
 				}
 				if (els.length === 0) continue;
-				groupEls.push(els);
 				const r = els[0]!.getBoundingClientRect();
+				if (r.width === 0 && r.height === 0) continue;
+				let extent = r.bottom;
+				for (let e = els.length - 1; e >= 0; e--) {
+					const er = els[e]!.getBoundingClientRect();
+					if (er.width === 0 && er.height === 0) continue;
+					if (er.bottom > extent) extent = er.bottom;
+					break;
+				}
+				groupEls.push(els);
 				itemRects.push(r);
+				itemIdxs.push(ii);
+				itemExtents.push(extent);
 			}
 			if (groupEls.length === 0) continue;
-			allGroupSlots.push({ group: g, groupEls, itemRects });
+			allGroupSlots.push({
+				group: g,
+				groupEls,
+				itemRects,
+				itemIdxs,
+				itemExtents,
+			});
 		}
 		if (allGroupSlots.length === 0) continue;
 		const targetFile = (leafView as MarkdownView).file;
@@ -508,19 +645,19 @@ async function commitCrossFileMoveCM(
 	const extract = extractItemFromText(docText, freshFrom, freshFromIdx);
 	if (!extract) return;
 
-	const affectedStart = freshFrom.items[0]!.startLine;
-	const affectedEnd = freshFrom.items[freshFrom.items.length - 1]!.endLine;
-	const from = sourceView.state.doc.line(affectedStart + 1).from;
-	const to = sourceView.state.doc.line(affectedEnd + 1).to;
-	const sourceLines = extract.text.split("\n");
-	const newSlice = sourceLines
-		.slice(affectedStart, affectedEnd + 1)
-		.join("\n");
-	sourceView.dispatch({
-		changes: { from, to, insert: newSlice },
-	});
+	const srcStart = freshFrom.items[freshFromIdx]!.startLine;
+	const srcLen = extract.block.length;
+	const sourceKind = fromGroup.kind;
 
+	// Resolve and apply the target insertion before touching the source, so a
+	// failed target lookup can never delete the item without re-inserting it.
 	const targetCM = getCMFromLeaf(app, targetFile);
+	let openTarget: {
+		cm: EditorView;
+		freshTo: Group;
+		text: string;
+		insertAt: number;
+	} | null = null;
 	if (targetCM) {
 		const targetText = targetCM.state.doc.toString();
 		const targetLines = targetText.split("\n");
@@ -530,8 +667,6 @@ async function commitCrossFileMoveCM(
 			g.items.some((it) => it.startLine === targetAnchor),
 		);
 		if (!freshTo) return;
-
-		const sourceKind = fromGroup.kind;
 		const result = insertItemIntoText(
 			targetText,
 			extract.block,
@@ -540,19 +675,14 @@ async function commitCrossFileMoveCM(
 			toIdx,
 		);
 		if (!result) return;
-
-		const newLines = result.split("\n");
-		const affectedStart2 = freshTo.items[0]!.startLine;
-		const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
-		const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
-		const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
-		const insertSlice = newLines
-			.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
-			.join("\n");
-		targetCM.dispatch({
-			changes: { from: from2, to: to2, insert: insertSlice },
-		});
+		openTarget = {
+			cm: targetCM,
+			freshTo,
+			text: result.text,
+			insertAt: result.insertAt,
+		};
 	} else {
+		let inserted = false;
 		await app.vault.process(targetFile, (text) => {
 			const targetLines = text.split("\n");
 			const targetGroups = findAllGroups(targetLines);
@@ -561,16 +691,72 @@ async function commitCrossFileMoveCM(
 				g.items.some((it) => it.startLine === targetAnchor),
 			);
 			if (!freshTo) return text;
-			const sourceKind = fromGroup.kind;
-			return (
-				insertItemIntoText(
-					text,
-					extract.block,
-					sourceKind,
-					freshTo,
-					toIdx,
-				) ?? text
+			const result = insertItemIntoText(
+				text,
+				extract.block,
+				sourceKind,
+				freshTo,
+				toIdx,
 			);
+			if (!result) return text;
+			inserted = true;
+			return result.text;
 		});
+		if (!inserted) return;
+		// the await opened a window for concurrent source edits; skip the
+		// removal (leaving a duplicate the user can undo) rather than
+		// deleting lines that may no longer be the dragged item
+		if (sourceView.state.doc.toString() !== docText) return;
+	}
+
+	const sourceAnchors = captureFoldAnchors(sourceView);
+
+	const affectedStart = freshFrom.items[0]!.startLine;
+	const affectedEnd = freshFrom.items[freshFrom.items.length - 1]!.endLine;
+	const from = sourceView.state.doc.line(affectedStart + 1).from;
+	const to = sourceView.state.doc.line(affectedEnd + 1).to;
+	const sourceLines = extract.text.split("\n");
+	// extract.text is srcLen lines shorter than the doc, while [from, to]
+	// spans the group's OLD extent — the window must shrink to match or the
+	// lines following the group get duplicated into the replacement
+	const newSlice = sourceLines
+		.slice(affectedStart, affectedEnd + 1 - srcLen)
+		.join("\n");
+	sourceView.dispatch({
+		changes: { from, to, insert: newSlice },
+	});
+
+	restoreFoldAnchors(
+		sourceView,
+		sourceAnchors
+			.filter((a) => a < srcStart || a >= srcStart + srcLen)
+			.map((a) => (a >= srcStart + srcLen ? a - srcLen : a)),
+	);
+
+	if (openTarget) {
+		const { cm, freshTo, insertAt, text: targetNewText } = openTarget;
+		const movedAnchorOffsets = sourceAnchors
+			.filter((a) => a >= srcStart && a < srcStart + srcLen)
+			.map((a) => a - srcStart);
+		const targetAnchors = captureFoldAnchors(cm);
+
+		const newLines = targetNewText.split("\n");
+		const affectedStart2 = freshTo.items[0]!.startLine;
+		const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
+		const from2 = cm.state.doc.line(affectedStart2 + 1).from;
+		const to2 = cm.state.doc.line(affectedEnd2 + 1).to;
+		const insertSlice = newLines
+			.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
+			.join("\n");
+		cm.dispatch({
+			changes: { from: from2, to: to2, insert: insertSlice },
+		});
+
+		restoreFoldAnchors(
+			cm,
+			targetAnchors
+				.map((a) => (a >= insertAt ? a + srcLen : a))
+				.concat(movedAnchorOffsets.map((off) => insertAt + off)),
+		);
 	}
 }

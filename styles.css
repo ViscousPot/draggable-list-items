@@ -30,14 +30,19 @@ body:not(.dli-enabled) .markdown-rendered li > .dli-handle {
 	line-height: 1;
 	text-align: center;
 	font-size: 0.85em;
-	color: var(--text-muted);
+	color: rgba(0, 0, 0, 0.4);
 	cursor: grab;
 	user-select: none;
 	-webkit-user-select: none;
 	touch-action: none;
-	opacity: 0;
-	transition: opacity 80ms ease;
+	transition:
+		color 80ms ease,
+		filter 80ms ease;
 	z-index: 6;
+}
+
+.theme-dark .dli-handle {
+	color: rgba(255, 255, 255, 0.4);
 }
 
 .markdown-rendered li > .dli-handle {
@@ -64,8 +69,6 @@ body:not(.dli-enabled) .markdown-rendered li > .dli-handle {
 }
 
 body.dli-mobile .dli-handle {
-	visibility: visible;
-	opacity: 0.7;
 	width: 1.4em;
 	font-size: 1em;
 }
@@ -74,15 +77,21 @@ body.dli-mobile .markdown-rendered li > .dli-handle {
 	left: -0.8em;
 }
 
-.dli-handle.dli-show,
-.dli-handle:hover,
-.markdown-rendered li:hover > .dli-handle {
-	opacity: 0.7;
+.dli-handle:not(.dli-has-children):hover {
+	color: rgba(0, 0, 0, 0.8);
 }
 
-.dli-handle:hover {
-	opacity: 1;
-	color: var(--text-normal);
+.theme-dark .dli-handle:not(.dli-has-children):hover {
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.dli-handle.dli-has-children {
+	color: var(--interactive-accent);
+}
+
+.dli-handle.dli-has-children:hover {
+	color: var(--interactive-accent);
+	filter: brightness(1.15);
 }
 
 .dli-handle:active {

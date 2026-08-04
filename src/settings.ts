@@ -40,7 +40,7 @@ export class DraggableListSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Enable cross-group drag")
 			.setDesc(
-				"Drag list items between groups at the same indent level (e.g., between two separate bullet lists).",
+				"Drag list items between separate lists at the same indent level, across headings and paragraphs. Release in the upper half of the space holding a heading to place the item above it, or the lower half to place it below.",
 			)
 			.addToggle((t) =>
 				t
@@ -68,7 +68,7 @@ export class DraggableListSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Collapse list items")
 			.setDesc(
-				"The drag handle replaces the collapse chevron. Right-click the handle on a collapsible list item to collapse or expand it.",
+				"The drag handle replaces the collapse chevron. Items with sub-items show an accent-colored handle: left-click it to collapse or expand them; click and drag to move the item instead.",
 			);
 	}
 }

@@ -11,17 +11,17 @@ Works in reading view and live preview, on desktop and mobile. Tasks (`- [ ]`), 
 
 ## Usage
 
-Hover a list item to reveal the handle, then drag. On mobile the handle is always visible. A ghost preview follows the cursor and a drop indicator line shows where the item will land.
+Every list item shows a drag handle next to its checkbox or bullet; items with nested children show it in your accent color. Press the handle and drag to move an item. A ghost preview follows the cursor and a drop indicator line shows where the item will land. Collapsed items stay collapsed — dragging never changes any item's collapsed state.
 
 `Esc` cancels an in-progress drag.
 
 ### Collapse / expand
 
-Right-click the handle on a collapsible list item to toggle its collapsed state. The handle replaces the default collapse chevron.
+Click the handle on a collapsible list item (accent-colored) to toggle its collapsed state. A click only counts while the pointer stays within the drag threshold, so dragging never toggles. The handle replaces the default collapse chevron.
 
 ### Cross-group drag
 
-Enable **Cross-group drag** in settings to drag items between separate lists at the same indent level (e.g., between two bullet lists).
+Enable **Cross-group drag** in settings to drag items between separate lists at the same indent level — including across headings and paragraphs. In the space holding a heading, release in the upper half to place the item above the heading, or in the lower half to place it below.
 
 ### Cross-file drag
 
@@ -32,9 +32,9 @@ Enable **Cross-file drag** in settings to drag items between different files acr
 Open **Settings → Community plugins → Draggable List Items**:
 
 - **Enable drag handles** -- Show or hide all drag handles.
-- **Enable cross-group drag** -- Drag items between groups at the same indent.
+- **Enable cross-group drag** -- Drag items between lists at the same indent, across headings and paragraphs.
 - **Enable cross-file drag** -- Drag items across files in different editor panes (live preview only).
-- **Collapse list items** -- Info: right-click the handle to collapse or expand.
+- **Collapse list items** -- Info: click the accent-colored handle to collapse or expand.
 
 ## Install
 
