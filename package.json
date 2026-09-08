@@ -10,6 +10,7 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test:e2e": "./test/e2e/make-test-vault.sh && wdio run ./test/e2e/wdio.conf.mjs",
+		"test:unit": "node test/unit/run.mjs",
 		"test:e2e:norec": "DLI_NO_REC=1 npm run test:e2e",
 		"test:e2e:mobile": "DLI_MOBILE=1 npm run test:e2e",
 		"test:e2e:all": "npm run test:e2e && npm run test:e2e:mobile",

@@ -31,5 +31,6 @@ export default tseslint.config(
 		"package.json",
 		"main.js",
 		"test/e2e/**",
+		"test/unit/**",
 	]),
 );
