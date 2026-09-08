@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { browser } from "@wdio/globals";
-import { locateOrFail } from "../lib/drag.mjs";
+import { drag, above, below, locateOrFail } from "../lib/drag.mjs";
 import { openClean } from "../lib/obsidian.mjs";
 
 const rightClick = async (l) => {
@@ -23,6 +23,20 @@ const visibleText = () =>
 			.map((el) => el.textContent)
 			.join("\n"),
 	);
+
+const childAVisible = () =>
+	browser.execute(() => {
+		const child = Array.from(document.querySelectorAll(".cm-line")).find((el) =>
+			(el.textContent || "").includes("child a"),
+		);
+		const r = child ? child.getBoundingClientRect() : null;
+		return !!r && r.height > 0;
+	});
+
+const ensureCollapsed = async (parent) => {
+	if (await childAVisible()) await rightClick(parent);
+	await browser.pause(200);
+};
 
 describe("collapse via the handle", function () {
 	it("folds and unfolds a parent in live preview", async function () {
@@ -55,5 +69,29 @@ describe("collapse via the handle", function () {
 			),
 		);
 		assert.ok(collapsed, "the list item should carry is-collapsed");
+	});
+
+	it("preserves fold state across a drag", async function () {
+		await openClean("nested.md");
+		const parent = await locateOrFail("parent one");
+		await ensureCollapsed(parent);
+		assert.ok(!(await childAVisible()), "children hidden before drag");
+
+		const three = await locateOrFail("parent three");
+		await drag("parent three", above(parent));
+
+		assert.ok(!(await childAVisible()), "the fold must survive the drag");
+	});
+
+	it("keeps a collapsed subtree collapsed when the parent is dragged", async function () {
+		await openClean("nested.md");
+		const parent = await locateOrFail("parent one");
+		await ensureCollapsed(parent);
+		assert.ok(!(await childAVisible()), "children hidden before drag");
+
+		const three = await locateOrFail("parent three");
+		await drag("parent one", below(three));
+
+		assert.ok(!(await childAVisible()), "the fold must travel with the collapsed subtree");
 	});
 });

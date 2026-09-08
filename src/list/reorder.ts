@@ -5,6 +5,61 @@ export interface MoveResult {
 	newOrder: number[];
 }
 
+export function insertionIndex(
+	toGroup: Group,
+	toIdx: number,
+	sourceStart: number,
+	sourceLen: number,
+): number {
+	const targetStart = toGroup.items[0]!.startLine;
+	const shift = sourceStart < targetStart ? sourceLen : 0;
+	let insertAt = targetStart - shift;
+	for (let i = 0; i < toIdx; i++) {
+		const item = toGroup.items[i]!;
+		insertAt += item.endLine - item.startLine + 1;
+	}
+	return insertAt;
+}
+
+export function remapLines(
+	sourceStart: number,
+	sourceEnd: number,
+	insertAt: number,
+	lines: number[],
+): number[] {
+	const len = sourceEnd - sourceStart + 1;
+	return lines.map((L) => {
+		if (L >= sourceStart && L <= sourceEnd) return insertAt + (L - sourceStart);
+		const p = L < sourceStart ? L : L - len;
+		return p < insertAt ? p : p + len;
+	});
+}
+
+export function moveParams(
+	fromGroup: Group,
+	fromIdx: number,
+	toGroup: Group,
+	toIdx: number,
+): { s: number; e: number; t: number } | null {
+	const s = fromGroup.items[fromIdx]?.startLine;
+	const e = fromGroup.items[fromIdx]?.endLine;
+	if (s === undefined || e === undefined) return null;
+	const len = e - s + 1;
+	if (fromGroup === toGroup) {
+		const adjusted = toIdx > fromIdx ? toIdx - 1 : toIdx;
+		const affectedEnd = fromGroup.items[fromGroup.items.length - 1]!.endLine;
+		const starts: number[] = [];
+		for (let k = 0; k < fromGroup.items.length; k++) {
+			if (k === fromIdx) continue;
+			const it = fromGroup.items[k]!;
+			starts.push(it.startLine - (k > fromIdx ? len : 0));
+		}
+		const t = adjusted < starts.length ? starts[adjusted]! : affectedEnd - len + 1;
+		return { s, e, t };
+	}
+	return { s, e, t: insertionIndex(toGroup, toIdx, s, len) };
+}
+
 export function moveItemCrossGroup(
 	text: string,
 	fromGroup: Group,
@@ -32,14 +87,7 @@ export function moveItemCrossGroup(
 		adjustBlockToGroup(sourceBlock, toGroup);
 	}
 
-	const targetStart = toGroup.items[0]!.startLine;
-	const shift = sourceStart < targetStart ? sourceLen : 0;
-	let insertAt = targetStart - shift;
-	for (let i = 0; i < toIdx; i++) {
-		const item = toGroup.items[i]!;
-		insertAt += item.endLine - item.startLine + 1;
-	}
-
+	const insertAt = insertionIndex(toGroup, toIdx, sourceStart, sourceLen);
 	lines.splice(insertAt, 0, ...sourceBlock);
 
 	let result = lines.join("\n");

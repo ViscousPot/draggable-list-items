@@ -4,13 +4,16 @@ import {
 	ViewUpdate,
 	PluginValue,
 } from "@codemirror/view";
-import { foldCode, unfoldCode, foldedRanges } from "@codemirror/language";
+import { foldCode, unfoldCode, foldedRanges, foldable, foldEffect } from "@codemirror/language";
+import { StateEffect } from "@codemirror/state";
 import { App, Editor, ItemView, MarkdownView, Platform, TFile } from "obsidian";
 import { findAllGroups, Group } from "../list/parse";
 import {
 	moveItemCrossGroup,
 	extractItemFromText,
 	insertItemIntoText,
+	remapLines,
+	moveParams,
 } from "../list/reorder";
 import { beginDrag } from "../drag/controller";
 import { DragSession, GroupSlot, CrossFileResult } from "../drag/types";
@@ -416,6 +419,8 @@ function commitMoveCM(
 	);
 	if (!result) return;
 
+	const move = moveParams(freshFrom, freshFromIdx, freshTo, toIdx);
+	const folds = snapshotFolds(view);
 	const newLines = result.split("\n");
 	const affectedStart = Math.min(
 		freshFrom.items[0]!.startLine,
@@ -431,6 +436,45 @@ function commitMoveCM(
 	view.dispatch({
 		changes: { from, to, insert: newSlice },
 	});
+	if (move) restoreFolds(view, folds, move.s, move.e, move.t);
+}
+
+function snapshotFolds(
+	view: EditorView,
+): { headerLine: number; toLine: number }[] {
+	const folds: { headerLine: number; toLine: number }[] = [];
+	const doc = view.state.doc;
+	foldedRanges(view.state).between(0, doc.length, (from, to) => {
+		folds.push({
+			headerLine: doc.lineAt(from).number,
+			toLine: doc.lineAt(to).number,
+		});
+	});
+	return folds;
+}
+
+function restoreFolds(
+	view: EditorView,
+	folds: { headerLine: number; toLine: number }[],
+	s: number,
+	e: number,
+	t: number,
+): void {
+	if (folds.length === 0) return;
+	const effects: StateEffect<unknown>[] = [];
+	const doc = view.state.doc;
+	for (const f of folds) {
+		const [h, tl] = remapLines(s, e, t, [f.headerLine - 1, f.toLine - 1]);
+		const headerLine = h! + 1;
+		const toLine = tl! + 1;
+		if (toLine <= headerLine + 1) continue;
+		const line = doc.line(headerLine);
+		const range = foldable(view.state, line.from, line.to);
+		if (!range) continue;
+		if (doc.lineAt(range.to).number !== toLine) continue;
+		effects.push(foldEffect.of(range));
+	}
+	if (effects.length) view.dispatch({ effects });
 }
 
 function getFileForCM(app: App, cm: EditorView): TFile | null {
