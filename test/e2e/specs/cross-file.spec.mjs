@@ -35,4 +35,23 @@ describe("cross-file drag", function () {
 		assert.ok(!a.includes("a-one"), "a-one must leave the source file:\n" + a);
 		assert.ok(b.includes("a-one"), "a-one must land in the target file:\n" + b);
 	});
+
+	it("does not duplicate content below the source group", async function () {
+		await setSettings({ enableCrossFileDrag: true, enableCrossGroupDrag: true });
+		await openSplit("cross-c.md", "cross-b.md");
+
+		const target = await locateOrFail("b-two");
+		await drag("c-one", onto(target));
+
+		const a = await readLeaf("cross-c.md");
+		const b = await readLeaf("cross-b.md");
+		assert.ok(!a.includes("c-one"), "c-one must leave the source file:\n" + a);
+		assert.ok(b.includes("c-one"), "c-one must land in the target file:\n" + b);
+		assert.strictEqual(
+			a.split("Trailing paragraph that must not be duplicated.").length - 1,
+			1,
+			"trailing content must appear exactly once:\n" + a,
+		);
+		assert.ok(a.includes("- c-two"), "c-two must stay in the source file:\n" + a);
+	});
 });

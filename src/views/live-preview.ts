@@ -506,18 +506,8 @@ async function commitCrossFileMoveCM(
 	const extract = extractItemFromText(docText, freshFrom, freshFromIdx);
 	if (!extract) return;
 
-	const affectedStart = freshFrom.items[0]!.startLine;
-	const affectedEnd = freshFrom.items[freshFrom.items.length - 1]!.endLine;
-	const from = sourceView.state.doc.line(affectedStart + 1).from;
-	const to = sourceView.state.doc.line(affectedEnd + 1).to;
-	const sourceLines = extract.text.split("\n");
-	const newSlice = sourceLines
-		.slice(affectedStart, affectedEnd + 1)
-		.join("\n");
-	sourceView.dispatch({
-		changes: { from, to, insert: newSlice },
-	});
-
+	const sourceSnapshot = sourceView.state.doc.toString();
+	let inserted = false;
 	const targetCM = getCMFromLeaf(app, targetFile);
 	if (targetCM) {
 		const targetText = targetCM.state.doc.toString();
@@ -527,29 +517,30 @@ async function commitCrossFileMoveCM(
 		const freshTo = targetGroups.find((g) =>
 			g.items.some((it) => it.startLine === targetAnchor),
 		);
-		if (!freshTo) return;
-
-		const sourceKind = fromGroup.kind;
-		const result = insertItemIntoText(
-			targetText,
-			extract.block,
-			sourceKind,
-			freshTo,
-			toIdx,
-		);
-		if (!result) return;
-
-		const newLines = result.split("\n");
-		const affectedStart2 = freshTo.items[0]!.startLine;
-		const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
-		const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
-		const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
-		const insertSlice = newLines
-			.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
-			.join("\n");
-		targetCM.dispatch({
-			changes: { from: from2, to: to2, insert: insertSlice },
-		});
+		if (freshTo) {
+			const sourceKind = fromGroup.kind;
+			const result = insertItemIntoText(
+				targetText,
+				extract.block,
+				sourceKind,
+				freshTo,
+				toIdx,
+			);
+			if (result) {
+				const newLines = result.split("\n");
+				const affectedStart2 = freshTo.items[0]!.startLine;
+				const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
+				const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
+				const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
+				const insertSlice = newLines
+					.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
+					.join("\n");
+				targetCM.dispatch({
+					changes: { from: from2, to: to2, insert: insertSlice },
+				});
+				inserted = true;
+			}
+		}
 	} else {
 		await app.vault.process(targetFile, (text) => {
 			const targetLines = text.split("\n");
@@ -560,15 +551,31 @@ async function commitCrossFileMoveCM(
 			);
 			if (!freshTo) return text;
 			const sourceKind = fromGroup.kind;
-			return (
-				insertItemIntoText(
-					text,
-					extract.block,
-					sourceKind,
-					freshTo,
-					toIdx,
-				) ?? text
+			const result = insertItemIntoText(
+				text,
+				extract.block,
+				sourceKind,
+				freshTo,
+				toIdx,
 			);
+			if (!result) return text;
+			inserted = true;
+			return result;
 		});
 	}
+
+	if (!inserted) return;
+	if (sourceView.state.doc.toString() !== sourceSnapshot) return;
+
+	const affectedStart = freshFrom.items[0]!.startLine;
+	const affectedEnd = freshFrom.items[freshFrom.items.length - 1]!.endLine;
+	const from = sourceView.state.doc.line(affectedStart + 1).from;
+	const to = sourceView.state.doc.line(affectedEnd + 1).to;
+	const sourceLines = extract.text.split("\n");
+	const newSlice = sourceLines
+		.slice(affectedStart, affectedEnd + 1 - extract.block.length)
+		.join("\n");
+	sourceView.dispatch({
+		changes: { from, to, insert: newSlice },
+	});
 }
