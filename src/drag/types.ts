@@ -15,6 +15,8 @@ export interface GroupSlot {
 	group: Group;
 	groupEls: HTMLElement[][];
 	itemRects: DOMRect[];
+	itemIdxs: number[];
+	subtreeBottoms: number[];
 }
 
 export interface CrossFileResult {

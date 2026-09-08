@@ -121,17 +121,28 @@ async function onHandlePointerDown(
 	for (const g of allGroups) {
 		const groupEls: HTMLElement[][] = [];
 		const itemRects: DOMRect[] = [];
-		for (const item of g.items) {
+		const itemIdxs: number[] = [];
+		const subtreeBottoms: number[] = [];
+		for (let i = 0; i < g.items.length; i++) {
+			const item = g.items[i]!;
 			const liEl = lineMap.get(item.startLine);
 			if (!liEl) {
 				groupEls.length = 0;
 				break;
 			}
 			groupEls.push([liEl]);
-			itemRects.push(liEl.getBoundingClientRect());
+			const r = liEl.getBoundingClientRect();
+			itemRects.push(r);
+			itemIdxs.push(i);
+			let bottom = r.bottom;
+			for (let ln = item.startLine + 1; ln <= item.endLine; ln++) {
+				const child = lineMap.get(ln);
+				if (child) bottom = Math.max(bottom, child.getBoundingClientRect().bottom);
+			}
+			subtreeBottoms.push(bottom);
 		}
 		if (groupEls.length === 0) continue;
-		allGroupSlots.push({ group: g, groupEls, itemRects });
+		allGroupSlots.push({ group: g, groupEls, itemRects, itemIdxs, subtreeBottoms });
 	}
 
 	const sourceSlot = allGroupSlots.find((s) => s.group === group);

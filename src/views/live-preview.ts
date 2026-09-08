@@ -29,6 +29,17 @@ function lineNumber(cm: EditorView, el: HTMLElement): number | null {
 	}
 }
 
+function unionRect(els: HTMLElement[]): DOMRect {
+	let top = Infinity;
+	let bottom = -Infinity;
+	for (const el of els) {
+		const r = el.getBoundingClientRect();
+		if (r.top < top) top = r.top;
+		if (r.bottom > bottom) bottom = r.bottom;
+	}
+	return new DOMRect(0, top, 0, bottom - top);
+}
+
 interface HandleEntry {
 	handle: HTMLElement;
 	cleanup: () => void;
@@ -279,7 +290,10 @@ export function buildLivePreviewExtension(
 				for (const g of allGroups) {
 					const groupEls: HTMLElement[][] = [];
 					const itemRects: DOMRect[] = [];
-					for (const item of g.items) {
+					const itemIdxs: number[] = [];
+					const subtreeBottoms: number[] = [];
+					for (let i = 0; i < g.items.length; i++) {
+						const item = g.items[i]!;
 						const els: HTMLElement[] = [];
 						for (
 							let ln = item.startLine;
@@ -293,9 +307,11 @@ export function buildLivePreviewExtension(
 						groupEls.push(els);
 						const r = els[0]!.getBoundingClientRect();
 						itemRects.push(r);
+						itemIdxs.push(i);
+						subtreeBottoms.push(unionRect(els).bottom);
 					}
 					if (groupEls.length === 0) continue;
-					allGroupSlots.push({ group: g, groupEls, itemRects });
+					allGroupSlots.push({ group: g, groupEls, itemRects, itemIdxs, subtreeBottoms });
 				}
 
 const sourceSlot = allGroupSlots.find((s) => s.group === group);
@@ -457,7 +473,10 @@ function queryCrossFileCM(
 		for (const g of allGroups) {
 			const groupEls: HTMLElement[][] = [];
 			const itemRects: DOMRect[] = [];
-			for (const item of g.items) {
+			const itemIdxs: number[] = [];
+			const subtreeBottoms: number[] = [];
+			for (let i = 0; i < g.items.length; i++) {
+				const item = g.items[i]!;
 				const els: HTMLElement[] = [];
 				for (let ln = item.startLine; ln <= item.endLine; ln++) {
 					const el = lineMap.get(ln);
@@ -467,9 +486,11 @@ function queryCrossFileCM(
 				groupEls.push(els);
 				const r = els[0]!.getBoundingClientRect();
 				itemRects.push(r);
+				itemIdxs.push(i);
+				subtreeBottoms.push(unionRect(els).bottom);
 			}
 			if (groupEls.length === 0) continue;
-			allGroupSlots.push({ group: g, groupEls, itemRects });
+			allGroupSlots.push({ group: g, groupEls, itemRects, itemIdxs, subtreeBottoms });
 		}
 		if (allGroupSlots.length === 0) continue;
 		const targetFile = (leafView as MarkdownView).file;

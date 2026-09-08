@@ -257,7 +257,7 @@ function collectDropRects(
 		}
 		for (let i = 0; i < slot.groupEls.length; i++) {
 			const rect = slot.itemRects[i]!;
-			result.push({ groupSlotIdx: g, itemIdx: i, rect });
+			result.push({ groupSlotIdx: g, itemIdx: slot.itemIdxs[i]!, rect });
 		}
 	}
 	result.sort((a, b) => a.rect.top - b.rect.top);
@@ -360,21 +360,28 @@ function updateIndicator(
 	let left: number;
 	let width: number;
 	if (target.itemIdx === 0) {
-		const r = rects[0]!;
+		const p = slot.itemIdxs.indexOf(0);
+		if (p < 0) return;
+		const r = rects[p]!;
 		y = r.top;
 		left = r.left;
 		width = r.width;
-	} else if (target.itemIdx >= rects.length) {
-		const r = rects[rects.length - 1]!;
+	} else if (target.itemIdx > slot.group.items.length - 1) {
+		const p = slot.itemIdxs.indexOf(slot.group.items.length - 1);
+		if (p < 0) return;
+		const r = rects[p]!;
 		y = r.bottom;
 		left = r.left;
 		width = r.width;
 	} else {
-		const a = rects[target.itemIdx - 1]!;
-		const b = rects[target.itemIdx]!;
-		y = (a.bottom + b.top) / 2;
-		left = Math.min(a.left, b.left);
-		width = Math.max(a.right, b.right) - left;
+		const a = slot.itemIdxs.indexOf(target.itemIdx - 1);
+		const b = slot.itemIdxs.indexOf(target.itemIdx);
+		if (a < 0 || b < 0) return;
+		const ra = rects[a]!;
+		const rb = rects[b]!;
+		y = (ra.bottom + rb.top) / 2;
+		left = Math.min(ra.left, rb.left);
+		width = Math.max(ra.right, rb.right) - left;
 	}
 	indicator.classList.add("dli-visible");
 	indicator.style.left = `${left}px`;
