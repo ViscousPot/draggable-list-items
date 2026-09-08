@@ -134,7 +134,7 @@ async function onHandlePointerDown(
 		allGroupSlots.push({ group: g, groupEls, itemRects });
 	}
 
-	const sourceSlot = allGroupSlots[sourceGroupIdx];
+	const sourceSlot = allGroupSlots.find((s) => s.group === group);
 	if (!sourceSlot || sourceSlot.groupEls.length === 0) return;
 
 	const session: DragSession = {

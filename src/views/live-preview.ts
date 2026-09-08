@@ -21,6 +21,14 @@ const HANDLE_CM_CLASS = "dli-handle-cm";
 const SHOW_CLASS = "dli-show";
 const OVERLAY_CLASS = "dli-cm-overlay";
 
+function lineNumber(cm: EditorView, el: HTMLElement): number | null {
+	try {
+		return cm.state.doc.lineAt(cm.posAtDOM(el)).number - 1;
+	} catch {
+		return null;
+	}
+}
+
 interface HandleEntry {
 	handle: HTMLElement;
 	cleanup: () => void;
@@ -263,13 +271,8 @@ export function buildLivePreviewExtension(
 				const cmLines = view.contentDOM.querySelectorAll(".cm-line");
 				for (const node of Array.from(cmLines)) {
 					const lineEl2 = node as HTMLElement;
-					try {
-						const p = view.posAtDOM(lineEl2);
-						const num = view.state.doc.lineAt(p).number - 1;
-						lineMap.set(num, lineEl2);
-					} catch {
-						/* skip */
-					}
+					const num = lineNumber(view, lineEl2);
+					if (num !== null) lineMap.set(num, lineEl2);
 				}
 
 				const allGroupSlots: GroupSlot[] = [];
@@ -295,8 +298,8 @@ export function buildLivePreviewExtension(
 					allGroupSlots.push({ group: g, groupEls, itemRects });
 				}
 
-				const sourceSlot = allGroupSlots[groupIdx]!;
-				if (sourceSlot.groupEls.length === 0) return;
+const sourceSlot = allGroupSlots.find((s) => s.group === group);
+			if (!sourceSlot || sourceSlot.groupEls.length === 0) return;
 
 				const sourceFile =
 					getFileForCM(this.app, this.view) ??
@@ -447,13 +450,8 @@ function queryCrossFileCM(
 			cm.contentDOM.querySelectorAll(".cm-line"),
 		)) {
 			const el = node as HTMLElement;
-			try {
-				const p = cm.posAtDOM(el);
-				const num = cm.state.doc.lineAt(p).number - 1;
-				lineMap.set(num, el);
-			} catch {
-				/* skip */
-			}
+			const num = lineNumber(cm, el);
+			if (num !== null) lineMap.set(num, el);
 		}
 		const allGroupSlots: GroupSlot[] = [];
 		for (const g of allGroups) {
