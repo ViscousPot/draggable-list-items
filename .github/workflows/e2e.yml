@@ -1,0 +1,44 @@
+name: E2E tests
+
+on:
+    push:
+        branches: ["**"]
+    pull_request:
+        branches: ["**"]
+
+jobs:
+    e2e:
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        env:
+            DLI_NO_REC: "1"
+            DLI_NO_VISUAL: "1"
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24.x
+                  cache: "npm"
+
+            - name: Install system deps (Xvfb + window listing)
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends xvfb wmctrl iproute2
+
+            - name: Cache Obsidian binaries
+              uses: actions/cache@v4
+              with:
+                  path: ~/.cache/obsidian-launcher
+                  key: obsidian-${{ hashFiles('package-lock.json') }}
+
+            - run: npm ci
+
+            - name: Build plugin
+              run: npm run build
+
+            - name: Run e2e suite (desktop)
+              run: xvfb-run -a npm run test:e2e
+
+            - name: Run e2e suite (mobile emulation)
+              run: xvfb-run -a npm run test:e2e:mobile
