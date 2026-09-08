@@ -30,5 +30,6 @@ export default tseslint.config(
 		"versions.json",
 		"package.json",
 		"main.js",
+		"test/e2e/**",
 	]),
 );
