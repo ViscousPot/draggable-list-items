@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { drag, onto, locateOrFail } from "../lib/drag.mjs";
-import { openClean, docText, setSettings, handleCount } from "../lib/obsidian.mjs";
+import { openClean, docText, fileText, setSettings, handleCount } from "../lib/obsidian.mjs";
 
 describe("settings", function () {
 	afterEach(async function () {
@@ -53,4 +53,49 @@ describe("settings", function () {
 			"the bullet must be rewritten as an unchecked task:\n" + after,
 		);
 	});
+
+	for (const [label, mode] of [
+		["live preview", "source"],
+		["reading view", "preview"],
+	]) {
+		it(`moves an item across a heading when dropped below the heading (${label})`, async function () {
+			await setSettings({ enableCrossGroupDrag: true });
+			await openClean("sections.md", { mode });
+
+			const bravo = await locateOrFail("bravo");
+			const charlie = await locateOrFail("charlie");
+			const gapMid = (bravo.row.y + bravo.row.h + charlie.row.y) / 2;
+			await drag("alpha", { x: charlie.row.x + 40, y: gapMid + 2 });
+
+			const after = mode === "preview" ? await fileText("sections.md") : await docText();
+			assert.ok(
+				after.indexOf("alpha") > after.indexOf("## Two"),
+				"alpha must move below the heading:\n" + after,
+			);
+			assert.ok(
+				after.indexOf("alpha") < after.indexOf("charlie"),
+				"alpha must land before charlie:\n" + after,
+			);
+		});
+
+		it(`keeps an item above a heading when dropped above the heading midpoint (${label})`, async function () {
+			await setSettings({ enableCrossGroupDrag: true });
+			await openClean("sections.md", { mode });
+
+			const bravo = await locateOrFail("bravo");
+			const charlie = await locateOrFail("charlie");
+			const gapMid = (bravo.row.y + bravo.row.h + charlie.row.y) / 2;
+			await drag("alpha", { x: charlie.row.x + 40, y: gapMid - 2 });
+
+			const after = mode === "preview" ? await fileText("sections.md") : await docText();
+			assert.ok(
+				after.indexOf("alpha") < after.indexOf("## Two"),
+				"alpha must stay above the heading:\n" + after,
+			);
+			assert.ok(
+				after.indexOf("alpha") > after.indexOf("bravo"),
+				"alpha must land after bravo:\n" + after,
+			);
+		});
+	}
 });

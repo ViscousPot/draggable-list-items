@@ -1,5 +1,6 @@
 import { DragSession, GroupSlot, CrossFileResult } from "./types";
 import { Group } from "../list/parse";
+import { hitTest, HitTarget, DropEntry } from "./hittest";
 
 let cancelActive: (() => void) | null = null;
 
@@ -39,7 +40,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		e.preventDefault();
 		positionGhost(ghost, e.clientX - offsetX, e.clientY - offsetY);
 
-		const sourceHit = hitTest(
+		const sourceHit = testHit(
 			session.allGroups,
 			session.group,
 			session.enableCrossGroupDrag,
@@ -56,7 +57,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 			if (cf) {
 				crossFile = cf;
 				activeGroups = cf.allGroups;
-				target = hitTest(
+				target = testHit(
 					activeGroups,
 					session.group,
 					true,
@@ -237,98 +238,47 @@ function positionGhost(ghost: HTMLElement, x: number, y: number): void {
 	ghost.style.top = `${y}px`;
 }
 
-interface HitTarget {
-	groupSlotIdx: number;
-	itemIdx: number;
-}
-
-function collectDropRects(
+function collectDropEntries(
 	slots: GroupSlot[],
 	sourceGroup: Group,
 	enableCrossGroupDrag: boolean,
-): { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] {
-	const result: { groupSlotIdx: number; itemIdx: number; rect: DOMRect }[] =
-		[];
+): DropEntry[] {
+	const result: DropEntry[] = [];
 	for (let g = 0; g < slots.length; g++) {
 		const slot = slots[g]!;
 		if (slot.group !== sourceGroup) {
 			if (!enableCrossGroupDrag) continue;
 			if (slot.group.indent !== sourceGroup.indent) continue;
 		}
-		for (let i = 0; i < slot.groupEls.length; i++) {
-			const rect = slot.itemRects[i]!;
-			result.push({ groupSlotIdx: g, itemIdx: slot.itemIdxs[i]!, rect });
+		for (let j = 0; j < slot.groupEls.length; j++) {
+			const rect = slot.itemRects[j]!;
+			result.push({
+				groupSlotIdx: g,
+				itemIdx: slot.itemIdxs[j]!,
+				top: rect.top,
+				lineBottom: rect.bottom,
+				bottom: slot.subtreeBottoms[j]!,
+				left: rect.left,
+				right: rect.right,
+			});
 		}
 	}
-	result.sort((a, b) => a.rect.top - b.rect.top);
+	result.sort((a, b) => a.top - b.top);
 	return result;
 }
 
-function hitTest(
+function testHit(
 	groups: GroupSlot[],
 	sourceGroup: Group,
 	enableCrossGroupDrag: boolean,
 	x: number,
 	y: number,
 ): HitTarget | null {
-	const allRects = collectDropRects(
-		groups,
-		sourceGroup,
-		enableCrossGroupDrag,
+	return hitTest(
+		collectDropEntries(groups, sourceGroup, enableCrossGroupDrag),
+		x,
+		y,
 	);
-	if (allRects.length === 0) return null;
-
-	const first = allRects[0]!.rect;
-	const last = allRects[allRects.length - 1]!.rect;
-	const slack = 24;
-	const minLeft = Math.min(...allRects.map((r) => r.rect.left)) - slack;
-	const maxRight = Math.max(...allRects.map((r) => r.rect.right)) + slack;
-	if (x < minLeft || x > maxRight) return null;
-	if (y < first.top - slack) return null;
-	if (y > last.bottom + slack) return null;
-
-	if (y <= first.top) {
-		return {
-			groupSlotIdx: allRects[0]!.groupSlotIdx,
-			itemIdx: allRects[0]!.itemIdx,
-		};
-	}
-	if (y >= last.bottom) {
-		const lastItem = allRects[allRects.length - 1]!;
-		return {
-			groupSlotIdx: lastItem.groupSlotIdx,
-			itemIdx: lastItem.itemIdx + 1,
-		};
-	}
-
-	for (let i = 0; i < allRects.length; i++) {
-		const r = allRects[i]!.rect;
-		const mid = r.top + r.height / 2;
-		if (y < mid) {
-			return {
-				groupSlotIdx: allRects[i]!.groupSlotIdx,
-				itemIdx: allRects[i]!.itemIdx,
-			};
-		}
-		if (y < r.bottom) {
-			const next = allRects[i + 1];
-			if (next) {
-				return {
-					groupSlotIdx: next.groupSlotIdx,
-					itemIdx: next.itemIdx,
-				};
-			}
-			return {
-				groupSlotIdx: allRects[i]!.groupSlotIdx,
-				itemIdx: allRects[i]!.itemIdx + 1,
-			};
-		}
-	}
-	const lastItem = allRects[allRects.length - 1]!;
-	return {
-		groupSlotIdx: lastItem.groupSlotIdx,
-		itemIdx: lastItem.itemIdx + 1,
-	};
 }
 
 function updateIndicator(
@@ -355,31 +305,31 @@ function updateIndicator(
 		indicator.classList.remove("dli-visible");
 		return;
 	}
-	const rects = slot.itemRects;
+	const lastIdx = slot.group.items.length - 1;
 	let y: number;
 	let left: number;
 	let width: number;
 	if (target.itemIdx === 0) {
 		const p = slot.itemIdxs.indexOf(0);
 		if (p < 0) return;
-		const r = rects[p]!;
+		const r = slot.itemRects[p]!;
 		y = r.top;
 		left = r.left;
 		width = r.width;
-	} else if (target.itemIdx > slot.group.items.length - 1) {
-		const p = slot.itemIdxs.indexOf(slot.group.items.length - 1);
+	} else if (target.itemIdx > lastIdx) {
+		const p = slot.itemIdxs.indexOf(lastIdx);
 		if (p < 0) return;
-		const r = rects[p]!;
-		y = r.bottom;
+		const r = slot.itemRects[p]!;
+		y = slot.subtreeBottoms[p]!;
 		left = r.left;
 		width = r.width;
 	} else {
 		const a = slot.itemIdxs.indexOf(target.itemIdx - 1);
 		const b = slot.itemIdxs.indexOf(target.itemIdx);
 		if (a < 0 || b < 0) return;
-		const ra = rects[a]!;
-		const rb = rects[b]!;
-		y = (ra.bottom + rb.top) / 2;
+		const ra = slot.itemRects[a]!;
+		const rb = slot.itemRects[b]!;
+		y = (slot.subtreeBottoms[a]! + rb.top) / 2;
 		left = Math.min(ra.left, rb.left);
 		width = Math.max(ra.right, rb.right) - left;
 	}
