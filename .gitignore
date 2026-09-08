@@ -18,5 +18,7 @@ main.js
 # obsidian
 data.json
 
+test/e2e/.visual/
+
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
