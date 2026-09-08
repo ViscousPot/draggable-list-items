@@ -125,10 +125,18 @@ export function buildLivePreviewExtension(
 						this.handles.set(lineEl, entry);
 					}
 					const r = lineEl.getBoundingClientRect();
-					const top = r.top - overlayRect.top;
 					const offset = Platform.isMobile ? 18 : 14;
+					const rowRange = activeDocument.createRange();
+					rowRange.selectNodeContents(lineEl);
+					const rowCount = new Set(
+						Array.from(rowRange.getClientRects()).map((rect) =>
+							Math.round(rect.top),
+						),
+					).size;
 
 					let contentLeft: number | null = null;
+					let rowTop: number | null = null;
+					let rowHeight: number | null = null;
 					const linePos = this.view.posAtDOM(lineEl);
 					if (linePos >= 0 && linePos <= this.view.state.doc.length) {
 						const line = this.view.state.doc.lineAt(linePos);
@@ -136,16 +144,23 @@ export function buildLivePreviewExtension(
 						const coords = this.view.coordsAtPos(
 							line.from + indent,
 						);
-						if (coords) contentLeft = coords.left;
+						if (coords) {
+							contentLeft = coords.left;
+							if (rowCount > 1) {
+								rowTop = coords.top;
+								rowHeight = coords.bottom - coords.top;
+							}
+						}
 						entry.lineNum = line.number - 1;
 						entry.indent = indent;
 					}
 
 					const anchorLeft = contentLeft ?? r.left;
 					const left = anchorLeft - overlayRect.left - offset;
+					const top = (rowTop ?? r.top) - overlayRect.top;
 					entry.handle.style.top = `${top}px`;
 					entry.handle.style.left = `${left}px`;
-					entry.handle.style.height = `${r.height}px`;
+					entry.handle.style.height = `${rowHeight ?? r.height}px`;
 				}
 
 				for (const [el, entry] of this.handles) {

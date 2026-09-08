@@ -80,4 +80,46 @@ describe("live preview", function () {
 		await openClean("bullets.md");
 		assert.strictEqual(await handleCount(), 4);
 	});
+
+	it("aligns the handle to the first row of a wrapped item", async function () {
+		await openClean("wrapped.md");
+		const info = await browser.execute(() => {
+			const lines = Array.from(
+				document.querySelectorAll(".cm-line.HyperMD-list-line"),
+			);
+			const long = lines.find((l) =>
+				(l.textContent || "").includes("very long list item"),
+			);
+			if (!long) return null;
+			const longRect = long.getBoundingClientRect();
+			const range = document.createRange();
+			range.selectNodeContents(long);
+			const firstRow = range.getClientRects()[0];
+			const handle = Array.from(document.querySelectorAll(".dli-handle")).find(
+				(h) => {
+					const hr = h.getBoundingClientRect();
+					const cy = hr.top + hr.height / 2;
+					return cy >= longRect.top - 2 && cy <= longRect.bottom + 2;
+				},
+			);
+			if (!handle || !firstRow) return null;
+			const hr = handle.getBoundingClientRect();
+			return {
+				blockTop: Math.round(longRect.top),
+				blockHeight: Math.round(longRect.height),
+				firstRowTop: Math.round(firstRow.top),
+				handleTop: Math.round(hr.top),
+				handleHeight: Math.round(hr.height),
+			};
+		});
+		assert.ok(info, "wrapped item and its handle must be found");
+		assert.ok(
+			info.blockHeight > info.handleHeight,
+			`wrapped block should be taller than the handle (block ${info.blockHeight} vs handle ${info.handleHeight})`,
+		);
+		assert.ok(
+			Math.abs(info.handleTop - info.firstRowTop) <= 2,
+			`handle top should align with the first text row (${info.firstRowTop}), got ${info.handleTop}`,
+		);
+	});
 });
