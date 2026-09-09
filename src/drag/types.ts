@@ -7,6 +7,7 @@ export interface CommitContext {
 	fromGroup: Group;
 	toGroup: Group;
 	crossFile?: TFile;
+	asChild?: boolean;
 }
 
 export type CommitFn = (ctx: CommitContext) => void | Promise<void>;

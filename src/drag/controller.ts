@@ -30,6 +30,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 	const pointerId = ev.pointerId;
 
 	let target: HitTarget | null = null;
+	let targetIsChild = false;
 	let activeGroups: GroupSlot[] = session.allGroups;
 	let crossFile: CrossFileResult | null = null;
 
@@ -39,6 +40,31 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 		if (e.pointerId !== pointerId) return;
 		e.preventDefault();
 		positionGhost(ghost, e.clientX - offsetX, e.clientY - offsetY);
+
+		const childTarget = makeChildTarget(
+			session.allGroups,
+			session.group,
+			session.enableCrossGroupDrag,
+			e.clientX,
+			e.clientY,
+		);
+
+		if (childTarget !== null) {
+			target = childTarget;
+			targetIsChild = true;
+			activeGroups = session.allGroups;
+			crossFile = null;
+			updateIndicator(
+				indicator,
+				activeGroups,
+				session.group,
+				session.sourceItemIdx,
+				target,
+				true,
+			);
+			return;
+		}
+		targetIsChild = false;
 
 		const sourceHit = testHit(
 			session.allGroups,
@@ -107,6 +133,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 			const slot = groups[final.groupSlotIdx];
 			if (!slot) return;
 			if (
+				!targetIsChild &&
 				!finalCrossFile &&
 				slot.group === session.group &&
 				(final.itemIdx === session.sourceItemIdx ||
@@ -121,6 +148,7 @@ export function beginDrag(session: DragSession, ev: PointerEvent): void {
 					fromGroup: session.group,
 					toGroup: slot.group,
 					crossFile: finalCrossFile ? finalCrossFile.file : undefined,
+					asChild: targetIsChild,
 				}),
 			).catch((err) => console.error(err));
 		}
@@ -281,12 +309,35 @@ function testHit(
 	);
 }
 
+function makeChildTarget(
+	groups: GroupSlot[],
+	sourceGroup: Group,
+	enableCrossGroupDrag: boolean,
+	x: number,
+	y: number,
+): HitTarget | null {
+	if (!enableCrossGroupDrag || sourceGroup.indent === 0) return null;
+	const parentIndent = sourceGroup.indent - 1;
+	for (let g = 0; g < groups.length; g++) {
+		const slot = groups[g]!;
+		if (slot.group.indent !== parentIndent) continue;
+		for (let j = 0; j < slot.groupEls.length; j++) {
+			const rect = slot.itemRects[j]!;
+			if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+				return { groupSlotIdx: g, itemIdx: slot.itemIdxs[j]! };
+			}
+		}
+	}
+	return null;
+}
+
 function updateIndicator(
 	indicator: HTMLElement,
 	groups: GroupSlot[],
 	sourceGroup: Group,
 	sourceItemIdx: number,
 	target: HitTarget | null,
+	asChild = false,
 ): void {
 	if (target === null) {
 		indicator.classList.remove("dli-visible");
@@ -298,6 +349,7 @@ function updateIndicator(
 		return;
 	}
 	if (
+		!asChild &&
 		slot.group === sourceGroup &&
 		(target.itemIdx === sourceItemIdx ||
 			target.itemIdx === sourceItemIdx + 1)
@@ -309,7 +361,14 @@ function updateIndicator(
 	let y: number;
 	let left: number;
 	let width: number;
-	if (target.itemIdx === 0) {
+	if (asChild) {
+		const p = slot.itemIdxs.indexOf(target.itemIdx);
+		if (p < 0) return;
+		const r = slot.itemRects[p]!;
+		y = slot.subtreeBottoms[p]!;
+		left = r.left;
+		width = r.width;
+	} else if (target.itemIdx === 0) {
 		const p = slot.itemIdxs.indexOf(0);
 		if (p < 0) return;
 		const r = slot.itemRects[p]!;

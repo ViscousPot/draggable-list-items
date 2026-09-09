@@ -9,6 +9,8 @@ import {
 	remapLines,
 	insertionIndex,
 	moveParams,
+	makeChildItem,
+	insertAsChild,
 } from "../../src/list/reorder";
 
 const lines = (text: string) => text.split("\n");
@@ -163,4 +165,51 @@ test("insertionIndex accounts for the source shift", () => {
 	const tgt2 = all2.find((g) => g.items[0].startLine === 0)!;
 	assert.strictEqual(insertionIndex(tgt2, 2, 3, 1), 2);
 	assert.strictEqual(insertionIndex(tgt2, 0, 3, 1), 0);
+});
+
+test("makeChildItem re-indents an item under its new parent", () => {
+	const text = ["- p1", "\t- child x", "- p2", "\t- child y", "- p3"].join("\n");
+	const all = findAllGroups(lines(text));
+	const from = all.find((g) => g.indent === 1)!;
+	const parent = all.find((g) => g.indent === 0)!;
+	const result = makeChildItem(text, from, 0, parent, 2)!;
+	assert.strictEqual(
+		result.text,
+		["- p1", "- p2", "\t- child y", "- p3", "\t- child x"].join("\n"),
+	);
+	assert.deepStrictEqual([result.s, result.e, result.t], [1, 1, 4]);
+});
+
+test("makeChildItem places an item after existing children", () => {
+	const text = ["- p", "\t- c1", "\t- c2", "- other", "\t- c3"].join("\n");
+	const all = findAllGroups(lines(text));
+	const from = all.find((g) => g.indent === 1 && g.items.some((i) => i.startLine === 4))!;
+	const parent = all.find((g) => g.indent === 0 && g.items.some((i) => i.startLine === 0))!;
+	const result = makeChildItem(text, from, 0, parent, 0)!;
+	assert.strictEqual(
+		result.text,
+		["- p", "\t- c1", "\t- c2", "\t- c3", "- other"].join("\n"),
+	);
+});
+
+test("makeChildItem handles a source item with children", () => {
+	const text = ["- p1", "- p2", "\t- sub a", "\t- sub b"].join("\n");
+	const all = findAllGroups(lines(text));
+	const group = all.find((g) => g.indent === 0)!;
+	const result = makeChildItem(text, group, 1, group, 0)!;
+	assert.strictEqual(
+		result.text,
+		["- p1", " - p2", "  - sub a", "  - sub b"].join("\n"),
+	);
+});
+
+test("insertAsChild re-indents and inserts after the parent subtree", () => {
+	const text = ["- p", "\t- c", "- other"].join("\n");
+	const all = findAllGroups(lines(text));
+	const parent = all.find((g) => g.indent === 0 && g.items.some((i) => i.startLine === 0))!;
+	const result = insertAsChild(text, ["- moving", "\t- child of moving"], 0, parent, 0)!;
+	assert.strictEqual(
+		result,
+		["- p", "\t- c", " - moving", "  - child of moving", "- other"].join("\n"),
+	);
 });

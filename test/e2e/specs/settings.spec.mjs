@@ -58,6 +58,48 @@ describe("settings", function () {
 		["live preview", "source"],
 		["reading view", "preview"],
 	]) {
+		it(`re-indents an item under a parent when dropped on it (${label})`, async function () {
+			await setSettings({ enableCrossGroupDrag: true });
+			await openClean("reindent.md", { mode });
+			const parentThree = await locateOrFail("parent three");
+			await drag("child x", onto(parentThree));
+			const after = mode === "preview" ? await fileText("reindent.md") : await docText();
+			assert.ok(
+				after.includes("- parent three\n\t- child x"),
+				"child x must become a child of parent three:\n" + after,
+			);
+		});
+
+		it(`returns a moved child to its original parent (${label})`, async function () {
+			await setSettings({ enableCrossGroupDrag: true });
+			await openClean("reindent.md", { mode });
+
+			const parentTwo = await locateOrFail("parent two");
+			await drag("child x", onto(parentTwo));
+			let after = mode === "preview" ? await fileText("reindent.md") : await docText();
+			assert.ok(
+				after.includes("- parent two\n\t- child y\n\t- child x"),
+				"child x must move under parent two first:\n" + after,
+			);
+
+			const parentOne = await locateOrFail("parent one");
+			await drag("child x", onto(parentOne));
+			after = mode === "preview" ? await fileText("reindent.md") : await docText();
+			assert.ok(
+				after.includes("- parent one\n\t- child x"),
+				"child x must return under parent one:\n" + after,
+			);
+			assert.ok(
+				!after.includes("parent two\n\t- child x"),
+				"child x must leave parent two:\n" + after,
+			);
+		});
+	}
+
+	for (const [label, mode] of [
+		["live preview", "source"],
+		["reading view", "preview"],
+	]) {
 		it(`moves an item across a heading when dropped below the heading (${label})`, async function () {
 			await setSettings({ enableCrossGroupDrag: true });
 			await openClean("sections.md", { mode });

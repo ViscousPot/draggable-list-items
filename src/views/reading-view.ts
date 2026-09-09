@@ -1,6 +1,6 @@
 import { App, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { findGroup, findAllGroups, parseLine } from "../list/parse";
-import { moveItem, moveItemCrossGroup } from "../list/reorder";
+import { moveItem, moveItemCrossGroup, makeChildItem } from "../list/reorder";
 import { beginDrag } from "../drag/controller";
 import { DragSession, GroupSlot } from "../drag/types";
 import { DraggableListSettings } from "../settings";
@@ -159,8 +159,8 @@ async function onHandlePointerDown(
 		app,
 		sourceFile: file,
 		queryCrossFile: () => null,
-		commit: ({ fromIdx, toIdx, fromGroup, toGroup }) =>
-			commitMove(app, file, fromGroup, fromIdx, toGroup, toIdx),
+		commit: ({ fromIdx, toIdx, fromGroup, toGroup, asChild }) =>
+			commitMove(app, file, fromGroup, fromIdx, toGroup, toIdx, asChild),
 	};
 
 	beginDrag(session, ev);
@@ -173,10 +173,36 @@ async function commitMove(
 	fromIdx: number,
 	staleToGroup: { items: { startLine: number }[] },
 	toIdx: number,
+	asChild = false,
 ): Promise<void> {
 	const fromAnchor = staleFromGroup.items[fromIdx]?.startLine;
+	if (fromAnchor === undefined) return;
+	if (asChild) {
+		const parentAnchor = staleToGroup.items[toIdx]?.startLine;
+		if (parentAnchor === undefined) return;
+		await app.vault.process(file, (text) => {
+			const lines = text.split("\n");
+			const allGroups = findAllGroups(lines);
+			const freshFrom = allGroups.find((g) =>
+				g.items.some((it) => it.startLine === fromAnchor),
+			);
+			const freshParent = allGroups.find((g) =>
+				g.items.some((it) => it.startLine === parentAnchor),
+			);
+			if (!freshFrom || !freshParent) return text;
+			const freshFromIdx = freshFrom.items.findIndex(
+				(it) => it.startLine === fromAnchor,
+			);
+			const parentIdx = freshParent.items.findIndex(
+				(it) => it.startLine === parentAnchor,
+			);
+			if (freshFromIdx < 0 || parentIdx < 0) return text;
+			return makeChildItem(text, freshFrom, freshFromIdx, freshParent, parentIdx)?.text ?? text;
+		});
+		return;
+	}
 	const toAnchor = staleToGroup.items[0]?.startLine;
-	if (fromAnchor === undefined || toAnchor === undefined) return;
+	if (toAnchor === undefined) return;
 
 	const sameGroup = staleFromGroup === staleToGroup;
 

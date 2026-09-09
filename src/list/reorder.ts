@@ -60,6 +60,58 @@ export function moveParams(
 	return { s, e, t: insertionIndex(toGroup, toIdx, s, len) };
 }
 
+function reindentBlock(block: string[], delta: number): void {
+	for (let i = 0; i < block.length; i++) {
+		const line = block[i]!;
+		if (line.trim() === "") continue;
+		const ws = /^\s*/.exec(line)?.[0] ?? "";
+		if (delta === 0) continue;
+		const newIndent = Math.max(0, ws.length + delta);
+		block[i] = " ".repeat(newIndent) + line.slice(ws.length);
+	}
+}
+
+export function makeChildItem(
+	text: string,
+	fromGroup: Group,
+	fromIdx: number,
+	parentGroup: Group,
+	parentIdx: number,
+): { text: string; s: number; e: number; t: number } | null {
+	const fromItem = fromGroup.items[fromIdx];
+	const parentItem = parentGroup.items[parentIdx];
+	if (!fromItem || !parentItem) return null;
+	const lines = text.split("\n");
+	const s = fromItem.startLine;
+	const e = fromItem.endLine;
+	const len = e - s + 1;
+	const block = lines.splice(s, len);
+	reindentBlock(block, parentGroup.indent + 1 - fromGroup.indent);
+	const parentEnd = parentItem.endLine;
+	const t = parentEnd - (parentEnd >= s ? len : 0) + 1;
+	lines.splice(t, 0, ...block);
+	return { text: lines.join("\n"), s, e, t };
+}
+
+export function insertAsChild(
+	text: string,
+	block: string[],
+	sourceIndent: number,
+	parentGroup: Group,
+	parentIdx: number,
+): string | null {
+	const parentItem = parentGroup.items[parentIdx];
+	if (!parentItem) return null;
+	const lines = text.split("\n");
+	const copy = [...block];
+	reindentBlock(copy, parentGroup.indent + 1 - sourceIndent);
+	const t = parentItem.endLine + 1;
+	lines.splice(t, 0, ...copy);
+	let result = lines.join("\n");
+	if (parentGroup.kind === "ordered") result = renumberOrderedInText(result);
+	return result;
+}
+
 export function moveItemCrossGroup(
 	text: string,
 	fromGroup: Group,

@@ -14,6 +14,8 @@ import {
 	insertItemIntoText,
 	remapLines,
 	moveParams,
+	makeChildItem,
+	insertAsChild,
 } from "../list/reorder";
 import { beginDrag } from "../drag/controller";
 import { DragSession, GroupSlot, CrossFileResult } from "../drag/types";
@@ -359,6 +361,7 @@ const sourceSlot = allGroupSlots.find((s) => s.group === group);
 						fromGroup,
 						toGroup,
 						crossFile,
+						asChild,
 					}) => {
 						if (crossFile) {
 							return commitCrossFileMoveCM(
@@ -369,9 +372,10 @@ const sourceSlot = allGroupSlots.find((s) => s.group === group);
 								toGroup,
 								toIdx,
 								crossFile,
+								asChild,
 							);
 						}
-						commitMoveCM(view, fromGroup, fromIdx, toGroup, toIdx);
+						commitMoveCM(view, fromGroup, fromIdx, toGroup, toIdx, asChild);
 						return;
 					},
 				};
@@ -388,6 +392,7 @@ function commitMoveCM(
 	fromIdx: number,
 	toGroup: Group,
 	toIdx: number,
+	asChild = false,
 ): void {
 	const anchorLine = fromGroup.items[fromIdx]?.startLine;
 	if (anchorLine === undefined) return;
@@ -404,32 +409,66 @@ function commitMoveCM(
 	);
 	if (freshFromIdx < 0) return;
 
-	const targetAnchor = toGroup.items[0]!.startLine;
-	const freshTo = allGroups.find((g) =>
-		g.items.some((it) => it.startLine === targetAnchor),
-	);
-	if (!freshTo) return;
+	let result: string | null;
+	let move: { s: number; e: number; t: number } | null = null;
+	let affectedStart: number;
+	let affectedEnd: number;
+	if (asChild) {
+		const parentAnchor = toGroup.items[toIdx]?.startLine;
+		if (parentAnchor === undefined) return;
+		const freshParent = allGroups.find((g) =>
+			g.items.some((it) => it.startLine === parentAnchor),
+		);
+		if (!freshParent) return;
+		const parentIdx = freshParent.items.findIndex(
+			(it) => it.startLine === parentAnchor,
+		);
+		if (parentIdx < 0) return;
+		const child = makeChildItem(
+			docText,
+			freshFrom,
+			freshFromIdx,
+			freshParent,
+			parentIdx,
+		);
+		if (!child) return;
+		result = child.text;
+		move = { s: child.s, e: child.e, t: child.t };
+		affectedStart = Math.min(
+			freshFrom.items[0]!.startLine,
+			freshParent.items[0]!.startLine,
+		);
+		affectedEnd = Math.max(
+			freshFrom.items[freshFrom.items.length - 1]!.endLine,
+			freshParent.items[freshParent.items.length - 1]!.endLine,
+		);
+	} else {
+		const targetAnchor = toGroup.items[0]!.startLine;
+		const freshTo = allGroups.find((g) =>
+			g.items.some((it) => it.startLine === targetAnchor),
+		);
+		if (!freshTo) return;
+		result = moveItemCrossGroup(
+			docText,
+			freshFrom,
+			freshFromIdx,
+			freshTo,
+			toIdx,
+		);
+		if (!result) return;
+		move = moveParams(freshFrom, freshFromIdx, freshTo, toIdx);
+		affectedStart = Math.min(
+			freshFrom.items[0]!.startLine,
+			freshTo.items[0]!.startLine,
+		);
+		affectedEnd = Math.max(
+			freshFrom.items[freshFrom.items.length - 1]!.endLine,
+			freshTo.items[freshTo.items.length - 1]!.endLine,
+		);
+	}
 
-	const result = moveItemCrossGroup(
-		docText,
-		freshFrom,
-		freshFromIdx,
-		freshTo,
-		toIdx,
-	);
-	if (!result) return;
-
-	const move = moveParams(freshFrom, freshFromIdx, freshTo, toIdx);
 	const folds = snapshotFolds(view);
 	const newLines = result.split("\n");
-	const affectedStart = Math.min(
-		freshFrom.items[0]!.startLine,
-		freshTo.items[0]!.startLine,
-	);
-	const affectedEnd = Math.max(
-		freshFrom.items[freshFrom.items.length - 1]!.endLine,
-		freshTo.items[freshTo.items.length - 1]!.endLine,
-	);
 	const from = view.state.doc.line(affectedStart + 1).from;
 	const to = view.state.doc.line(affectedEnd + 1).to;
 	const newSlice = newLines.slice(affectedStart, affectedEnd + 1).join("\n");
@@ -567,6 +606,7 @@ async function commitCrossFileMoveCM(
 	toGroup: Group,
 	toIdx: number,
 	targetFile: TFile,
+	asChild = false,
 ): Promise<void> {
 	const anchorLine = fromGroup.items[fromIdx]?.startLine;
 	if (anchorLine === undefined) return;
@@ -586,61 +626,69 @@ async function commitCrossFileMoveCM(
 	const extract = extractItemFromText(docText, freshFrom, freshFromIdx);
 	if (!extract) return;
 
+	const insertInto = (text: string): { result: string; freshTo: Group } | null => {
+		const targetGroups = findAllGroups(text.split("\n"));
+		if (asChild) {
+			const parentAnchor = toGroup.items[toIdx]?.startLine;
+			if (parentAnchor === undefined) return null;
+			const freshTo = targetGroups.find((g) =>
+				g.items.some((it) => it.startLine === parentAnchor),
+			);
+			if (!freshTo) return null;
+			const parentIdx = freshTo.items.findIndex(
+				(it) => it.startLine === parentAnchor,
+			);
+			if (parentIdx < 0) return null;
+			const result = insertAsChild(
+				text,
+				extract.block,
+				fromGroup.indent,
+				freshTo,
+				parentIdx,
+			);
+			return result ? { result, freshTo } : null;
+		}
+		const targetAnchor = toGroup.items[0]!.startLine;
+		const freshTo = targetGroups.find((g) =>
+			g.items.some((it) => it.startLine === targetAnchor),
+		);
+		if (!freshTo) return null;
+		const result = insertItemIntoText(
+			text,
+			extract.block,
+			fromGroup.kind,
+			freshTo,
+			toIdx,
+		);
+		return result ? { result, freshTo } : null;
+	};
+
 	const sourceSnapshot = sourceView.state.doc.toString();
 	let inserted = false;
 	const targetCM = getCMFromLeaf(app, targetFile);
 	if (targetCM) {
 		const targetText = targetCM.state.doc.toString();
-		const targetLines = targetText.split("\n");
-		const targetGroups = findAllGroups(targetLines);
-		const targetAnchor = toGroup.items[0]!.startLine;
-		const freshTo = targetGroups.find((g) =>
-			g.items.some((it) => it.startLine === targetAnchor),
-		);
-		if (freshTo) {
-			const sourceKind = fromGroup.kind;
-			const result = insertItemIntoText(
-				targetText,
-				extract.block,
-				sourceKind,
-				freshTo,
-				toIdx,
-			);
-			if (result) {
-				const newLines = result.split("\n");
-				const affectedStart2 = freshTo.items[0]!.startLine;
-				const affectedEnd2 = freshTo.items[freshTo.items.length - 1]!.endLine;
-				const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
-				const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
-				const insertSlice = newLines
-					.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
-					.join("\n");
-				targetCM.dispatch({
-					changes: { from: from2, to: to2, insert: insertSlice },
-				});
-				inserted = true;
-			}
+		const ins = insertInto(targetText);
+		if (ins) {
+			const affectedStart2 = ins.freshTo.items[0]!.startLine;
+			const affectedEnd2 = ins.freshTo.items[ins.freshTo.items.length - 1]!.endLine;
+			const from2 = targetCM.state.doc.line(affectedStart2 + 1).from;
+			const to2 = targetCM.state.doc.line(affectedEnd2 + 1).to;
+			const insertSlice = ins.result
+				.split("\n")
+				.slice(affectedStart2, affectedEnd2 + 1 + extract.block.length)
+				.join("\n");
+			targetCM.dispatch({
+				changes: { from: from2, to: to2, insert: insertSlice },
+			});
+			inserted = true;
 		}
 	} else {
 		await app.vault.process(targetFile, (text) => {
-			const targetLines = text.split("\n");
-			const targetGroups = findAllGroups(targetLines);
-			const targetAnchor = toGroup.items[0]!.startLine;
-			const freshTo = targetGroups.find((g) =>
-				g.items.some((it) => it.startLine === targetAnchor),
-			);
-			if (!freshTo) return text;
-			const sourceKind = fromGroup.kind;
-			const result = insertItemIntoText(
-				text,
-				extract.block,
-				sourceKind,
-				freshTo,
-				toIdx,
-			);
-			if (!result) return text;
+			const ins = insertInto(text);
+			if (!ins) return text;
 			inserted = true;
-			return result;
+			return ins.result;
 		});
 	}
 
