@@ -1,6 +1,7 @@
 import { App, MarkdownPostProcessorContext, TFile } from "obsidian";
 import { findGroup, findAllGroups, parseLine } from "../list/parse";
 import { moveItem, moveItemCrossGroup, makeChildItem } from "../list/reorder";
+import { matchLineNumbers } from "../list/reading-match";
 import { beginDrag } from "../drag/controller";
 import { DragSession, GroupSlot } from "../drag/types";
 import { DraggableListSettings } from "../settings";
@@ -29,7 +30,25 @@ export function attachReadingViewHandles(
 	}
 
 	const lis = Array.from(el.querySelectorAll("li"));
-	if (lis.length !== startLines.length) return;
+	if (lis.length !== startLines.length) {
+		const parsed = startLines.map((line, i) => ({
+			line,
+			text: lines[i]!,
+		}));
+		const liTexts = lis.map((li) => {
+			const clone = li.cloneNode(true) as HTMLElement;
+			clone.querySelectorAll("ul, ol").forEach((u) => u.remove());
+			return (clone.textContent ?? "").trim();
+		});
+		const matches = matchLineNumbers(parsed, liTexts);
+		for (let i = 0; i < lis.length; i++) {
+			const lineNum = matches[i];
+			if (lineNum === null) continue;
+			lis[i]!.dataset[LINE_ATTR] = String(lineNum);
+			addHandle(lis[i]!, app, getSettings, ctx.sourcePath);
+		}
+		return;
+	}
 
 	for (let i = 0; i < lis.length; i++) {
 		const li = lis[i]!;
